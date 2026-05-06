@@ -1,19 +1,17 @@
 <template>
-  <!-- Bottom-pinned recording status bar (only visible during a recording).
-       Shows elapsed time, latest transcript line, Stop button. -->
+  <!-- Bottom-pinned status bar — visible during recording AND finalization. -->
   <div
     v-if="state !== 'idle' && state !== 'error'"
-    class="fixed bottom-0 left-0 right-0 z-50 bg-red-600 text-white shadow-2xl"
+    :class="[
+      'fixed bottom-0 left-0 right-0 z-50 text-white shadow-2xl',
+      state === 'finalizing' ? 'bg-blue-600' : 'bg-red-600',
+    ]"
   >
-    <div class="px-4 py-2 flex items-center gap-3">
-      <!-- Pulsing red dot -->
+    <!-- Recording state -->
+    <div v-if="state !== 'finalizing'" class="px-4 py-2 flex items-center gap-3">
       <span class="relative flex h-3 w-3 shrink-0">
-        <span
-          class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"
-        ></span>
-        <span
-          class="relative inline-flex rounded-full h-3 w-3 bg-red-300"
-        ></span>
+        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+        <span class="relative inline-flex rounded-full h-3 w-3 bg-red-300"></span>
       </span>
       <span class="font-mono text-sm shrink-0">{{ formattedElapsed }}</span>
       <span class="text-xs opacity-90 shrink-0">
@@ -32,6 +30,17 @@
       >
         ⏹ Stop
       </button>
+    </div>
+
+    <!-- Finalizing state — diarize + LLM (~5-10 min for typical meetings) -->
+    <div v-else class="px-4 py-2 flex items-center gap-3">
+      <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current animate-spin shrink-0">
+        <path d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
+      </svg>
+      <span class="text-sm flex-1 truncate">
+        {{ finalizeMessage || "Finalizing…" }}
+      </span>
+      <span class="text-xs opacity-75 shrink-0">phase: {{ finalizePhase || "starting" }}</span>
     </div>
   </div>
 
@@ -64,13 +73,15 @@ const props = defineProps({
 const emit = defineEmits(["state-changed", "note-created"]);
 const router = useRouter();
 
-// state machine: idle → connecting → recording → stopping → idle
+// state machine: idle → connecting → recording → stopping → finalizing → idle
 const state = ref("idle");
 const errorMessage = ref("");
 const elapsedMs = ref(0);
 const windowsCompleted = ref(0);
 const latestTranscript = ref("");
 const notePath = ref(null);
+const finalizePhase = ref("");
+const finalizeMessage = ref("");
 
 let ws = null;
 let mediaStream = null;
@@ -147,13 +158,39 @@ async function start() {
       windowsCompleted.value++;
       latestTranscript.value = msg.text;
     } else if (msg.type === "error") {
-      console.error("recorder error:", msg.message);
-      // Don't fail the whole recording on a single window error
-      latestTranscript.value = `(transcribe error: ${msg.message})`;
+      // Per-window transcribe errors are non-fatal; finalization errors are.
+      if (msg.phase === "finalize" || msg.phase === "import") {
+        state.value = "error";
+        errorMessage.value = msg.message;
+        emit("state-changed", state.value);
+      } else {
+        console.error("recorder error:", msg.message);
+        latestTranscript.value = `(transcribe error: ${msg.message})`;
+      }
     } else if (msg.type === "stopped") {
-      // Server confirmed stop
+      // Server received stop — finalization will follow with progress messages
+      state.value = "finalizing";
+      finalizePhase.value = "starting";
+      finalizeMessage.value = "Finalizing recording…";
+      emit("state-changed", state.value);
+    } else if (msg.type === "progress") {
+      finalizePhase.value = msg.phase || "";
+      finalizeMessage.value = msg.message || "";
+    } else if (msg.type === "finalized") {
+      // Pipeline complete — navigate to the new note (different path than the
+      // placeholder, since meetings.py derives a title from the LLM output)
+      notePath.value = msg.note_path;
       state.value = "idle";
       emit("state-changed", state.value);
+      navigateToNote(msg.note_path);
+      // Show a one-shot summary toast through finalizeMessage so the user
+      // knows what happened
+      const ident = msg.speakers_identified || 0;
+      const total = msg.speakers_total || 0;
+      const unknown = msg.speakers_unknown || 0;
+      finalizeMessage.value =
+        `Meeting note ready · ${ident}/${total} speakers identified` +
+        (unknown ? ` · ${unknown} unknown — open the note to label` : "");
     }
   };
   ws.onclose = () => {

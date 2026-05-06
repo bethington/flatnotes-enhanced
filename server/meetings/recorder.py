@@ -80,6 +80,111 @@ attendees: []
 router = APIRouter()
 
 
+# ── Stage 11: post-stop finalization ─────────────────────────────────────────
+
+
+async def _ffmpeg_concat_to_ogg(blob_paths: list[pathlib.Path], session_dir: pathlib.Path) -> pathlib.Path:
+    """Merge a list of self-contained WebM/Opus windows into one Ogg/Opus file.
+
+    Returns the path of the merged audio. Runs ffmpeg in a thread executor
+    so the asyncio loop isn't blocked.
+    """
+    if not blob_paths:
+        raise RuntimeError("no audio windows captured")
+    listfile = session_dir / "concat.txt"
+    # ffmpeg concat demuxer requires single-quoted paths
+    listfile.write_text(
+        "\n".join(f"file '{p}'" for p in blob_paths) + "\n"
+    )
+    output = session_dir / "merged.ogg"
+    cmd = [
+        "ffmpeg", "-y", "-loglevel", "error",
+        "-f", "concat", "-safe", "0",
+        "-i", str(listfile),
+        "-c:a", "libopus", "-b:a", "32k", "-ac", "1",
+        str(output),
+    ]
+    import subprocess
+    proc = await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: subprocess.run(cmd, capture_output=True, text=True),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"ffmpeg concat failed: {proc.stderr[-500:]}")
+    return output
+
+
+async def _finalize_recording(state: dict, websocket: WebSocket) -> None:
+    """Stop → merge windows → run full pipeline → move audio+transcript to
+    sidecar → delete placeholder note → notify client of new note path.
+    """
+    blob_paths = list(state["blob_paths"])
+    session_dir = state["session_dir"]
+    placeholder = state["note_path"]
+    category = state["category"]
+
+    # 1. Merge windows
+    await websocket.send_json({"type": "progress", "phase": "merging", "message": "Merging audio windows…"})
+    merged = await _ffmpeg_concat_to_ogg(blob_paths, session_dir)
+    logger.info("merged %d windows → %s (%d bytes)", len(blob_paths), merged, merged.stat().st_size)
+
+    # 2. Run the full pipeline (whisper-asr w/ diarize → voiceprints identify → meetings.py)
+    await websocket.send_json({"type": "progress", "phase": "diarizing", "message": "Running diarization (this is the slow step — ~5-10 min for 30+ min audio)…"})
+    try:
+        from meetings_mcp import pipeline  # type: ignore[import-not-found]
+    except ImportError:
+        await websocket.send_json({
+            "type": "error",
+            "phase": "import",
+            "message": "meetings_mcp not on PYTHONPATH",
+        })
+        return
+
+    def _run_pipeline():
+        return pipeline.run_full_pipeline(merged, category=category, allow_unmapped=True)
+
+    result = await asyncio.get_running_loop().run_in_executor(None, _run_pipeline)
+    new_note_path = pathlib.Path(result["meeting_note_path"])
+
+    # 3. Move merged audio + transcript JSON into the new note's .assets/ sidecar
+    await websocket.send_json({"type": "progress", "phase": "moving", "message": "Moving audio + transcript into vault sidecar…"})
+    sidecar = new_note_path.parent / f"{new_note_path.stem}.assets"
+    sidecar.mkdir(parents=True, exist_ok=True)
+    import shutil
+    sidecar_audio = sidecar / "audio.ogg"
+    shutil.move(str(merged), str(sidecar_audio))
+    sidecar_transcript = sidecar / "transcript.json"
+    transcript_src = pathlib.Path(result["diarized_json_path"])
+    if transcript_src.exists():
+        shutil.copy2(str(transcript_src), str(sidecar_transcript))
+
+    # 4. Delete the placeholder note (the meetings.py-derived note replaces it)
+    if placeholder and placeholder.exists() and placeholder != new_note_path:
+        try:
+            placeholder.unlink()
+            logger.info("deleted placeholder %s", placeholder)
+        except Exception as e:
+            logger.warning("could not delete placeholder %s: %s", placeholder, e)
+
+    # 5. Clean up the recording staging dir
+    try:
+        shutil.rmtree(str(session_dir), ignore_errors=True)
+    except Exception:
+        pass
+
+    # 6. Notify client of final note path + speaker stats
+    await websocket.send_json({
+        "type": "finalized",
+        "note_path": str(new_note_path),
+        "audio_path": str(sidecar_audio),
+        "speakers_total": result.get("speakers_total", 0),
+        "speakers_identified": result.get("speakers_identified", 0),
+        "speakers_unknown": result.get("speakers_unknown", 0),
+        "speaker_map": result.get("speaker_map", {}),
+        "unknown_speakers": result.get("unknown_speakers", []),
+    })
+
+
 def _vault_root() -> pathlib.Path:
     import os as _os
     return pathlib.Path(_os.environ.get("FLATNOTES_PATH") or pathlib.Path.home() / "Notes" / "Notes").resolve()
@@ -277,6 +382,22 @@ async def ws_record(
                         "session_id": session_id,
                         "blob_count": len(state["blob_paths"]),
                     })
+                    # Stage 11 — finalize: merge audio, diarize, LLM summarize.
+                    # Run synchronously so the client sees progress and the
+                    # final note path before the WS closes.
+                    if state["blob_paths"]:
+                        try:
+                            await _finalize_recording(state, websocket)
+                        except Exception as e:
+                            logger.exception("finalization failed")
+                            try:
+                                await websocket.send_json({
+                                    "type": "error",
+                                    "phase": "finalize",
+                                    "message": f"Finalization failed: {e}",
+                                })
+                            except Exception:
+                                pass
                     break
                 else:
                     await websocket.send_json({"type": "error", "message": f"unknown command: {t}"})
