@@ -88,9 +88,21 @@ class ClaudeCLIStrategy:
         self.model = model
         self.timeout_s = timeout_s
         # Tools the AI is allowed to invoke without a permission prompt.
-        # v1 Stage 2 only exposes read_note; later stages expand this.
+        # v1 Stage 5 exposes the full vault tool inventory.
         self.allowed_tools = allowed_tools or (
             "mcp__flatnotes__read_note",
+            "mcp__flatnotes__list_notes",
+            "mcp__flatnotes__search_notes",
+            "mcp__flatnotes__list_folders",
+            "mcp__flatnotes__list_tags",
+            "mcp__flatnotes__write_note",
+            "mcp__flatnotes__append_note",
+            "mcp__flatnotes__update_note",
+            "mcp__flatnotes__move_note",
+            "mcp__flatnotes__delete_note",
+            "mcp__flatnotes__set_frontmatter",
+            "mcp__flatnotes__add_tag",
+            "mcp__flatnotes__remove_tag",
         )
 
     async def chat(
