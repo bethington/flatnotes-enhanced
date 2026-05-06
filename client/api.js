@@ -449,3 +449,16 @@ export async function saveTaskIcons(settings) {
     return Promise.reject(response);
   }
 }
+
+// AI chat — single user turn. Pass session_id to continue an existing conversation,
+// or omit to start a fresh one (server returns the new UUID).
+export async function aiChat(message, sessionId = null) {
+  const body = { message };
+  if (sessionId) body.session_id = sessionId;
+  try {
+    const response = await api.post("api/ai/chat", body);
+    return response.data; // { session_id, response, elapsed_ms }
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}

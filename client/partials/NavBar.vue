@@ -27,6 +27,10 @@
         :title="isFolderSidebarOpen ? 'Close folder browser' : 'Browse folders'"
         :class="{ 'sidebar-active': isFolderSidebarOpen }" :forceLabel="false" />
 
+      <CustomButton :iconPath="mdiRobotOutline" label="AI" @click="$emit('toggleAiSidebar')"
+        :title="isAiSidebarOpen ? 'Close AI chat' : 'Open AI chat'"
+        :class="{ 'sidebar-active': isAiSidebarOpen }" :forceLabel="false" />
+
       <CustomButton :iconPath="mdilMenu" label="Menu" @click="toggleMenu" title="Open menu" :forceLabel="false" />
       <PrimeMenu ref="menu" :model="menuItems" :popup="true" />
     </div>
@@ -67,6 +71,9 @@
         <CustomButton :iconPath="mdiFolderMultiple" label="Folders" @click="$emit('toggleFolderSidebar')"
           :title="isFolderSidebarOpen ? 'Close folder browser' : 'Browse folders'"
           :class="{ 'sidebar-active': isFolderSidebarOpen }" :forceLabel="false" />
+        <CustomButton :iconPath="mdiRobotOutline" label="AI" @click="$emit('toggleAiSidebar')"
+          :title="isAiSidebarOpen ? 'Close AI chat' : 'Open AI chat'"
+          :class="{ 'sidebar-active': isAiSidebarOpen }" :forceLabel="false" />
         <CustomButton :iconPath="mdilMenu" label="Menu" @click="toggleMenu" title="Open menu" :forceLabel="false" />
         <PrimeMenu ref="menuMobile" :model="menuItems" :popup="true" />
       </div>
@@ -118,7 +125,7 @@
 </template>
 
 <script setup>
-import { mdiHome, mdiTagMultiple, mdiBookmark, mdiFolderMultiple, mdiCog, mdiPaperclip, mdiDeleteClock, mdiArchive, mdiFileDocumentOutline, mdiThemeLightDark } from "@mdi/js";
+import { mdiHome, mdiTagMultiple, mdiBookmark, mdiFolderMultiple, mdiCog, mdiPaperclip, mdiDeleteClock, mdiArchive, mdiFileDocumentOutline, mdiThemeLightDark, mdiRobotOutline } from "@mdi/js";
 import {
   mdilLogout,
   mdilMagnify,
@@ -145,9 +152,10 @@ const router = useRouter();
 const props = defineProps({
   isSidebarOpen: Boolean,
   isFolderSidebarOpen: Boolean,
+  isAiSidebarOpen: Boolean,
 });
 
-const emit = defineEmits(["toggleSearchModal", "toggleSidebar", "toggleFolderSidebar"]);
+const emit = defineEmits(["toggleSearchModal", "toggleSidebar", "toggleFolderSidebar", "toggleAiSidebar"]);
 
 const hasPinnedNotes = ref(false);
 

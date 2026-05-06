@@ -19,11 +19,18 @@
       @close="isFolderSidebarOpen = false"
     />
 
+    <!-- AI Chat Sidebar (slides from right) -->
+    <AiSidebar
+      :isOpen="isAiSidebarOpen"
+      @close="isAiSidebarOpen = false"
+    />
+
     <!-- Main content area with fixed header and scrollable content -->
     <div
       :class="[
         'flex flex-col flex-1 min-h-0 transition-all duration-300',
         (isSidebarOpen || isFolderSidebarOpen) ? 'md:ml-72' : 'md:ml-0',
+        isAiSidebarOpen ? 'md:mr-96' : 'md:mr-0',
       ]"
     >
       <!-- Fixed NavBar - does not scroll -->
@@ -35,9 +42,11 @@
           :hide-logo="true"
           :isSidebarOpen="isSidebarOpen"
           :isFolderSidebarOpen="isFolderSidebarOpen"
+          :isAiSidebarOpen="isAiSidebarOpen"
           @toggleSearchModal="toggleSearchModal"
           @toggleSidebar="openTagSidebar"
           @toggleFolderSidebar="openFolderSidebar"
+          @toggleAiSidebar="toggleAiSidebar"
         />
       </div>
 
@@ -60,6 +69,7 @@ import { apiErrorHandler, getConfig, getPrefs } from "./api.js";
 import PrimeToast from "./components/PrimeToast.vue";
 import TagSidebar from "./components/TagSidebar.vue";
 import FolderSidebar from "./components/FolderSidebar.vue";
+import AiSidebar from "./components/AiSidebar.vue";
 import { useGlobalStore } from "./globalStore.js";
 import { loadTheme, initThemeListener, cleanupThemeListener } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
@@ -75,14 +85,18 @@ const isSearchModalVisible = ref(false);
 // ── Sidebar state — both persisted, mutually exclusive ───────────────────────
 const isSidebarOpen = ref(localStorage.getItem("fn_sidebar_open") === "true");
 const isFolderSidebarOpen = ref(localStorage.getItem("fn_folder_sidebar_open") === "true");
+const isAiSidebarOpen = ref(localStorage.getItem("fn_ai_sidebar_open") === "true");
 const activeTags = ref([]);
 
-// Persist both sidebar states whenever they change
+// Persist sidebar states whenever they change
 watch(isSidebarOpen, (val) => {
   localStorage.setItem("fn_sidebar_open", String(val));
 });
 watch(isFolderSidebarOpen, (val) => {
   localStorage.setItem("fn_folder_sidebar_open", String(val));
+});
+watch(isAiSidebarOpen, (val) => {
+  localStorage.setItem("fn_ai_sidebar_open", String(val));
 });
 const loadingIndicator = ref();
 const navBar = ref();
@@ -185,6 +199,12 @@ function openFolderSidebar() {
     isSidebarOpen.value = false;  // close tag sidebar first
     isFolderSidebarOpen.value = true;
   }
+}
+
+// AI Sidebar lives on the right and does NOT mutually exclude the
+// left-side Tag/Folder sidebars — you can have both open at once.
+function toggleAiSidebar() {
+  isAiSidebarOpen.value = !isAiSidebarOpen.value;
 }
 
 function handleTagsChanged(tags) {
