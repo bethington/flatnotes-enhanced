@@ -12,6 +12,11 @@ cd "$ROOT"
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
 
+# Make personal-agent-mcp importable so the meeting upload route can call
+# meetings_mcp.pipeline directly (no extra subprocess hop for a deterministic
+# operation). Co-developed sibling repo; coupling here is intentional.
+export PYTHONPATH="${PYTHONPATH:+$PYTHONPATH:}/Users/ben/dev/personal-agent-mcp"
+
 # Pull secrets from keychain (no plaintext on disk)
 FLATNOTES_PASSWORD=$(security find-generic-password -a ben -s flatnotes-password -w)
 FLATNOTES_SECRET_KEY=$(security find-generic-password -a ben -s flatnotes-secret -w)

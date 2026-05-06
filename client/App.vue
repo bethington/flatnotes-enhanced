@@ -28,6 +28,9 @@
       @close="isAiSidebarOpen = false"
     />
 
+    <!-- Drop audio anywhere on the window to transcribe (Stage 9) -->
+    <AudioDropZone v-if="route.name !== 'login'" />
+
     <!-- Main content area with fixed header and scrollable content -->
     <div
       :class="[
@@ -74,6 +77,7 @@ import PrimeToast from "./components/PrimeToast.vue";
 import TagSidebar from "./components/TagSidebar.vue";
 import FolderSidebar from "./components/FolderSidebar.vue";
 import AiSidebar from "./components/AiSidebar.vue";
+import AudioDropZone from "./components/AudioDropZone.vue";
 import { useGlobalStore } from "./globalStore.js";
 import { loadTheme, initThemeListener, cleanupThemeListener } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
