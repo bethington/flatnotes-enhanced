@@ -88,7 +88,8 @@ class ClaudeCLIStrategy:
         self.model = model
         self.timeout_s = timeout_s
         # Tools the AI is allowed to invoke without a permission prompt.
-        # v1 Stage 5 exposes the full vault tool inventory.
+        # v1 Stage 5 added the full flatnotes_mcp inventory; Stage 8 adds
+        # meetings_mcp.transcribe_audio.
         self.allowed_tools = allowed_tools or (
             "mcp__flatnotes__read_note",
             "mcp__flatnotes__list_notes",
@@ -103,6 +104,7 @@ class ClaudeCLIStrategy:
             "mcp__flatnotes__set_frontmatter",
             "mcp__flatnotes__add_tag",
             "mcp__flatnotes__remove_tag",
+            "mcp__meetings__transcribe_audio",
         )
 
     async def chat(
