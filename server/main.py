@@ -531,11 +531,35 @@ async def ai_chat(req: _ChatRequest) -> _ChatResponse:
         if s == "vault" or not t:
             return None
         if s == "note":
+            # Auto-detect "note is being recorded right now" to give the AI
+            # a different posture for in-progress meetings (partial transcript,
+            # no speaker labels, no LLM sections yet).
+            recording_hint = ""
+            try:
+                import pathlib as _pl
+                vroot = _pl.Path(_chat_storage._vault_root())
+                npath = (vroot / t).resolve()
+                if str(npath).startswith(str(vroot)) and npath.exists():
+                    head = npath.read_text(encoding="utf-8", errors="replace")[:600]
+                    if "status: recording" in head:
+                        recording_hint = (
+                            " IMPORTANT: this note is currently being LIVE-RECORDED. "
+                            "The body contains a partial live transcript between "
+                            "<!-- live-transcript-start --> and <!-- live-transcript-end --> "
+                            "markers. There are NO speaker labels yet (diarization runs "
+                            "when recording stops). Answer questions based on what's been "
+                            "transcribed so far. Be clear when you're inferring vs. quoting. "
+                            "Do not assume the meeting is finished — TL;DR / Decisions / "
+                            "Action Items / Quotes sections do not exist yet."
+                        )
+            except Exception:
+                pass
             return (
                 f"This conversation is scoped to a single note: {t}. By default, "
                 f"focus on this note. Use read_note('{t}') as your primary source. "
                 f"You may read other notes if needed, but the user expects answers "
                 f"about this note unless they explicitly broaden the question."
+                + recording_hint
             )
         if s == "folder":
             return (

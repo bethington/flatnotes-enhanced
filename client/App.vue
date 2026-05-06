@@ -38,14 +38,12 @@
       @state-changed="onRecorderStateChanged"
     />
 
-    <!-- Main content area with fixed header and scrollable content -->
-    <div
-      :class="[
-        'flex flex-col flex-1 min-h-0 transition-all duration-300',
-        (isSidebarOpen || isFolderSidebarOpen) ? 'md:ml-72' : 'md:ml-0',
-        isAiSidebarOpen ? 'md:mr-96' : 'md:mr-0',
-      ]"
-    >
+    <!-- Main content area: fixed-width centered. Sidebars are absolute-
+         positioned overlays and do NOT push content (per Decision B) — content
+         stays in the same place whether sidebars are open or closed.
+         Cap at max-w-4xl (~896px) for readable line length and to ensure
+         content fits between both sidebars on screens 1440px+ without overlap. -->
+    <div class="flex flex-col flex-1 min-h-0 mx-auto w-full max-w-4xl">
       <!-- Fixed NavBar - does not scroll -->
       <div class="shrink-0">
         <NavBar

@@ -23,13 +23,34 @@ import asyncio
 import datetime as _dt
 import json
 import logging
+import os
 import pathlib
 import re
+import shutil as _shutil
 import uuid
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger("flatnotes.meetings.recorder")
+
+
+def _resolve_ffmpeg_path() -> str:
+    """Resolve absolute path to ffmpeg. LaunchAgent processes start with a
+    minimal PATH that excludes /opt/homebrew/bin, so we fall back to known
+    install locations. Override via FFMPEG_PATH env var."""
+    env = os.environ.get("FFMPEG_PATH")
+    if env and pathlib.Path(env).exists():
+        return env
+    found = _shutil.which("ffmpeg")
+    if found:
+        return found
+    for fallback in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
+        if pathlib.Path(fallback).exists():
+            return fallback
+    raise RuntimeError("ffmpeg not found on PATH or at common install locations")
+
+
+FFMPEG_PATH = _resolve_ffmpeg_path()
 
 # Where window WebM blobs are staged during a recording session. Stage 11
 # concatenates these into a single audio file and moves it to the note's
@@ -39,10 +60,17 @@ RECORDING_STAGING_DIR = pathlib.Path.home() / "Music" / "Meetings" / "_recording
 # whisper-asr endpoint
 WHISPER_ASR_URL = "http://10.0.10.30:9000"
 
-# Live-transcript section marker — server-managed; Stage 11 replaces it.
-LIVE_TRANSCRIPT_HEADER = "## Live Transcript"
+# HTML-comment markers delimit the live-transcript region for surgical
+# replacement at Stop. Hidden in Obsidian preview, parseable by tools, and
+# a clear signal to the AI sidebar that "what's between these is partial".
+LIVE_TRANSCRIPT_START = "<!-- live-transcript-start -->"
+LIVE_TRANSCRIPT_END = "<!-- live-transcript-end -->"
 
-# Default placeholder body for new in-progress meeting notes.
+# Minimal placeholder for new in-progress notes. No fake TL;DR/Decisions
+# section stubs — those would confuse the AI when it reads the in-progress
+# note. The H1 says "Recording in progress"; on Stop, the entire body
+# (markers + everything between) is replaced with the LLM-derived D-hybrid
+# output, with the URL/filename preserved.
 PLACEHOLDER_TEMPLATE = """---
 type: meeting
 status: recording
@@ -51,29 +79,15 @@ started: {started}
 attendees: []
 ---
 
-# {title}
+# Recording in progress — {ts_friendly}
 
-> 🔴 Recording. Live transcript updates every ~30 seconds.
+> 🔴 LIVE — transcript updates every ~30 seconds. Stop recording to generate the
+> finalized meeting note (TL;DR, Decisions, Action Items, Quotes, diarized transcript).
 
-{header}
+## Live Transcript
 
-(no transcript yet)
-
-## TL;DR
-
-*Will be generated when recording stops.*
-
-## Decisions
-
-*Will be generated when recording stops.*
-
-## Action Items
-
-*Will be generated when recording stops.*
-
-## Quotes
-
-*Will be generated when recording stops.*
+{start_marker}
+{end_marker}
 """
 
 
@@ -98,7 +112,7 @@ async def _ffmpeg_concat_to_ogg(blob_paths: list[pathlib.Path], session_dir: pat
     )
     output = session_dir / "merged.ogg"
     cmd = [
-        "ffmpeg", "-y", "-loglevel", "error",
+        FFMPEG_PATH, "-y", "-loglevel", "error",
         "-f", "concat", "-safe", "0",
         "-i", str(listfile),
         "-c:a", "libopus", "-b:a", "32k", "-ac", "1",
@@ -146,9 +160,26 @@ async def _finalize_recording(state: dict, websocket: WebSocket) -> None:
     result = await asyncio.get_running_loop().run_in_executor(None, _run_pipeline)
     new_note_path = pathlib.Path(result["meeting_note_path"])
 
-    # 3. Move merged audio + transcript JSON into the new note's .assets/ sidecar
-    await websocket.send_json({"type": "progress", "phase": "moving", "message": "Moving audio + transcript into vault sidecar…"})
-    sidecar = new_note_path.parent / f"{new_note_path.stem}.assets"
+    await websocket.send_json({"type": "progress", "phase": "moving", "message": "Updating placeholder note in place + moving audio to vault sidecar…"})
+
+    # 3. Read the LLM-derived content out of the new note, then write it to the
+    #    PLACEHOLDER's path. The URL the user is on stays stable (Decision A).
+    final_content = new_note_path.read_text(encoding="utf-8")
+    # Patch frontmatter source_file to point at the sidecar location we're
+    # about to move audio to. meetings.py wrote the merged-audio's working
+    # path; we want it to reference the in-vault sidecar.
+    final_audio_relpath = f"{placeholder.stem}.assets/audio.ogg"
+    final_content = re.sub(
+        r"^source_file:.*$",
+        f"source_file: {final_audio_relpath}",
+        final_content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    placeholder.write_text(final_content, encoding="utf-8")
+
+    # 4. Move audio + transcript into the placeholder's .assets/ sidecar
+    sidecar = placeholder.parent / f"{placeholder.stem}.assets"
     sidecar.mkdir(parents=True, exist_ok=True)
     import shutil
     sidecar_audio = sidecar / "audio.ogg"
@@ -158,24 +189,25 @@ async def _finalize_recording(state: dict, websocket: WebSocket) -> None:
     if transcript_src.exists():
         shutil.copy2(str(transcript_src), str(sidecar_transcript))
 
-    # 4. Delete the placeholder note (the meetings.py-derived note replaces it)
-    if placeholder and placeholder.exists() and placeholder != new_note_path:
+    # 5. Delete the meetings.py-created note now that we've copied its content
+    #    into the placeholder. Nothing else references it.
+    if new_note_path != placeholder and new_note_path.exists():
         try:
-            placeholder.unlink()
-            logger.info("deleted placeholder %s", placeholder)
+            new_note_path.unlink()
+            logger.info("removed duplicate meetings.py output %s", new_note_path)
         except Exception as e:
-            logger.warning("could not delete placeholder %s: %s", placeholder, e)
+            logger.warning("could not delete %s: %s", new_note_path, e)
 
-    # 5. Clean up the recording staging dir
+    # 6. Clean up the recording staging dir
     try:
         shutil.rmtree(str(session_dir), ignore_errors=True)
     except Exception:
         pass
 
-    # 6. Notify client of final note path + speaker stats
+    # 7. Notify client — note_path is the ORIGINAL placeholder path (stable URL)
     await websocket.send_json({
         "type": "finalized",
-        "note_path": str(new_note_path),
+        "note_path": str(placeholder),
         "audio_path": str(sidecar_audio),
         "speakers_total": result.get("speakers_total", 0),
         "speakers_identified": result.get("speakers_identified", 0),
@@ -217,12 +249,15 @@ def _format_timestamp_marker(seconds_from_start: float) -> str:
 def _create_in_progress_note(title: str, category: str) -> pathlib.Path:
     """Write the placeholder meeting note to disk and return its path."""
     note_path = _new_note_path(title, category)
-    started = _dt.datetime.now().astimezone().isoformat(timespec="seconds")
+    now = _dt.datetime.now().astimezone()
+    started_iso = now.isoformat(timespec="seconds")
+    ts_friendly = now.strftime("%Y-%m-%d %H:%M")
     content = PLACEHOLDER_TEMPLATE.format(
-        title=title,
         category=category,
-        started=started,
-        header=LIVE_TRANSCRIPT_HEADER,
+        started=started_iso,
+        ts_friendly=ts_friendly,
+        start_marker=LIVE_TRANSCRIPT_START,
+        end_marker=LIVE_TRANSCRIPT_END,
     )
     note_path.write_text(content, encoding="utf-8")
     logger.info("created in-progress meeting note: %s", note_path)
@@ -230,24 +265,19 @@ def _create_in_progress_note(title: str, category: str) -> pathlib.Path:
 
 
 def _append_to_live_transcript(note_path: pathlib.Path, text: str, ts_marker: str) -> None:
-    """Append a single window's transcript to the Live Transcript section.
-
-    First append removes the "(no transcript yet)" placeholder.
-    """
+    """Insert a single window's transcript text just before the
+    <!-- live-transcript-end --> marker. Idempotent across multiple windows
+    arriving out of order (each line is independent)."""
     if not note_path.exists():
         return
     content = note_path.read_text(encoding="utf-8")
-    content = content.replace("(no transcript yet)", "", 1)
-    addition = f"\n{ts_marker} {text.strip()}\n"
-    # Insert before the next ##-header (TL;DR) so live content stays grouped
-    # under "## Live Transcript".
-    parts = content.split("\n## ", 1)
-    if len(parts) == 2:
-        head, rest = parts
-        new = head.rstrip() + addition + "\n## " + rest
+    if LIVE_TRANSCRIPT_END not in content:
+        # Out of structure — append at end as a safety fallback
+        content = content.rstrip() + f"\n{ts_marker} {text.strip()}\n"
     else:
-        new = content.rstrip() + addition
-    note_path.write_text(new, encoding="utf-8")
+        addition = f"{ts_marker} {text.strip()}\n"
+        content = content.replace(LIVE_TRANSCRIPT_END, addition + LIVE_TRANSCRIPT_END, 1)
+    note_path.write_text(content, encoding="utf-8")
 
 
 async def _transcribe_window(blob_path: pathlib.Path) -> str:
