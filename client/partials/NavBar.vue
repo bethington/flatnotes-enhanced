@@ -31,6 +31,11 @@
         :title="isAiSidebarOpen ? 'Close AI chat' : 'Open AI chat'"
         :class="{ 'sidebar-active': isAiSidebarOpen }" :forceLabel="false" />
 
+      <CustomButton :iconPath="mdiMicrophone" label="Record" @click="$emit('startRecording')"
+        :title="isRecording ? 'A recording is already in progress' : 'Record a meeting'"
+        :class="{ 'sidebar-active': isRecording }"
+        :forceLabel="false" />
+
       <CustomButton :iconPath="mdilMenu" label="Menu" @click="toggleMenu" title="Open menu" :forceLabel="false" />
       <PrimeMenu ref="menu" :model="menuItems" :popup="true" />
     </div>
@@ -125,7 +130,7 @@
 </template>
 
 <script setup>
-import { mdiHome, mdiTagMultiple, mdiBookmark, mdiFolderMultiple, mdiCog, mdiPaperclip, mdiDeleteClock, mdiArchive, mdiFileDocumentOutline, mdiThemeLightDark, mdiRobotOutline } from "@mdi/js";
+import { mdiHome, mdiTagMultiple, mdiBookmark, mdiFolderMultiple, mdiCog, mdiPaperclip, mdiDeleteClock, mdiArchive, mdiFileDocumentOutline, mdiThemeLightDark, mdiRobotOutline, mdiMicrophone } from "@mdi/js";
 import {
   mdilLogout,
   mdilMagnify,
@@ -153,9 +158,10 @@ const props = defineProps({
   isSidebarOpen: Boolean,
   isFolderSidebarOpen: Boolean,
   isAiSidebarOpen: Boolean,
+  isRecording: Boolean,
 });
 
-const emit = defineEmits(["toggleSearchModal", "toggleSidebar", "toggleFolderSidebar", "toggleAiSidebar"]);
+const emit = defineEmits(["toggleSearchModal", "toggleSidebar", "toggleFolderSidebar", "toggleAiSidebar", "startRecording"]);
 
 const hasPinnedNotes = ref(false);
 

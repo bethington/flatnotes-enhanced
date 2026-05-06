@@ -579,11 +579,17 @@ async def ai_chat(req: _ChatRequest) -> _ChatResponse:
 
 # region Meetings (upload + pipeline)
 from meetings.routes import router as _meetings_router  # noqa: E402
+from meetings.recorder import router as _recorder_router  # noqa: E402
 
-# Apply auth_deps to every route in the meetings router
+# Apply auth_deps to every HTTP route in the meetings router
 for r in _meetings_router.routes:
     r.dependencies = list(getattr(r, "dependencies", []) or []) + list(auth_deps)
 router.include_router(_meetings_router)
+
+# WebSocket recorder router has its own auth (token via query param).
+# Don't apply HTTP-style auth_deps to WS routes — Depends() pattern doesn't
+# fit, so the handler validates the token internally.
+router.include_router(_recorder_router)
 # endregion
 
 app.include_router(router, prefix=global_config.path_prefix)

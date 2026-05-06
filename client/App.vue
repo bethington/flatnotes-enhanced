@@ -31,6 +31,13 @@
     <!-- Drop audio anywhere on the window to transcribe (Stage 9) -->
     <AudioDropZone v-if="route.name !== 'login'" />
 
+    <!-- Live recording UI (Stage 10) — bottom-pinned status bar while active -->
+    <LiveRecorder
+      v-if="route.name !== 'login'"
+      ref="liveRecorder"
+      @state-changed="onRecorderStateChanged"
+    />
+
     <!-- Main content area with fixed header and scrollable content -->
     <div
       :class="[
@@ -49,10 +56,12 @@
           :isSidebarOpen="isSidebarOpen"
           :isFolderSidebarOpen="isFolderSidebarOpen"
           :isAiSidebarOpen="isAiSidebarOpen"
+          :isRecording="isRecording"
           @toggleSearchModal="toggleSearchModal"
           @toggleSidebar="openTagSidebar"
           @toggleFolderSidebar="openFolderSidebar"
           @toggleAiSidebar="toggleAiSidebar"
+          @startRecording="startRecording"
         />
       </div>
 
@@ -78,6 +87,7 @@ import TagSidebar from "./components/TagSidebar.vue";
 import FolderSidebar from "./components/FolderSidebar.vue";
 import AiSidebar from "./components/AiSidebar.vue";
 import AudioDropZone from "./components/AudioDropZone.vue";
+import LiveRecorder from "./components/LiveRecorder.vue";
 import { useGlobalStore } from "./globalStore.js";
 import { loadTheme, initThemeListener, cleanupThemeListener } from "./helpers.js";
 import NavBar from "./partials/NavBar.vue";
@@ -235,6 +245,18 @@ function openFolderSidebar() {
 // left-side Tag/Folder sidebars — you can have both open at once.
 function toggleAiSidebar() {
   isAiSidebarOpen.value = !isAiSidebarOpen.value;
+}
+
+// ── Live recording state (Stage 10) ──────────────────────────────────────────
+const liveRecorder = ref();
+const isRecording = ref(false);
+
+function startRecording() {
+  if (liveRecorder.value) liveRecorder.value.start();
+}
+
+function onRecorderStateChanged(s) {
+  isRecording.value = s === "recording" || s === "stopping" || s === "connecting";
 }
 
 function handleTagsChanged(tags) {
