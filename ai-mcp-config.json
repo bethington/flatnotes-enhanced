@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "flatnotes": {
+      "command": "/Users/ben/dev/personal-agent-mcp/.venv/bin/python",
+      "args": ["-m", "flatnotes_mcp.server"],
+      "env": {
+        "VAULT_ROOT": "/Users/ben/Notes/Notes",
+        "PYTHONPATH": "/Users/ben/dev/personal-agent-mcp"
+      }
+    }
+  }
+}

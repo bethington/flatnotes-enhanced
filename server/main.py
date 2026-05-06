@@ -467,6 +467,46 @@ def healthcheck() -> str:
     return "OK"
 # endregion
 
+
+# region AI chat
+import time as _time
+import uuid as _uuid
+
+from ai.config import mcp_config_path as _ai_mcp_config_path
+from ai.config import validate_mcp_config as _ai_validate_mcp_config
+from ai.models import ChatRequest as _ChatRequest
+from ai.models import ChatResponse as _ChatResponse
+from ai.strategy import ClaudeCLIError as _ClaudeCLIError
+from ai.strategy import ClaudeCLIStrategy as _ClaudeCLIStrategy
+
+_ai_strategy = _ClaudeCLIStrategy()
+
+
+@router.post("/api/ai/chat", response_model=_ChatResponse, dependencies=auth_deps)
+async def ai_chat(req: _ChatRequest) -> _ChatResponse:
+    """Single user turn through the configured LLM strategy.
+
+    v1 Stage 2: ClaudeCLIStrategy only. Future stages add scope filtering and
+    per-tab session routing.
+    """
+    cfg_path = _ai_mcp_config_path()
+    _ai_validate_mcp_config(cfg_path)
+    is_continuation = req.session_id is not None
+    session_id = req.session_id or str(_uuid.uuid4())
+    started_at = _time.monotonic()
+    try:
+        text = await _ai_strategy.chat(req.message, session_id, cfg_path, is_continuation)
+    except _ClaudeCLIError as e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM strategy failed (exit {e.exit_code}): {e.stderr or e.stdout or 'no output'}",
+        )
+    elapsed_ms = int((_time.monotonic() - started_at) * 1000)
+    return _ChatResponse(session_id=session_id, response=text, elapsed_ms=elapsed_ms)
+
+
+# endregion
+
 app.include_router(router, prefix=global_config.path_prefix)
 app.mount(
     global_config.path_prefix,
