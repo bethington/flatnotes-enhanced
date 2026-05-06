@@ -660,10 +660,13 @@ class FileSystemNotes(BaseNotes):
                     indexed.add(idx_filename)
         for filename in self._list_all_note_filenames():
             if filename not in indexed:
-                self._add_note_to_index(
-                    writer, self._get_by_filename(filename)
-                )
-                logger.info(f"'{filename}' added to index")
+                try:
+                    self._add_note_to_index(
+                        writer, self._get_by_filename(filename)
+                    )
+                    logger.info(f"'{filename}' added to index")
+                except ValueError as e:
+                    logger.warning(f"SKIPPING '{filename}': {e}")
         writer.commit(optimize=optimize)
         logger.info("Index synchronized")
 
