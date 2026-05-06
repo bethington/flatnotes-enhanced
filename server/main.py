@@ -470,8 +470,8 @@ def healthcheck() -> str:
 
 # region AI chat
 import time as _time
-import uuid as _uuid
 
+from ai import chat_storage as _chat_storage
 from ai.config import mcp_config_path as _ai_mcp_config_path
 from ai.config import validate_mcp_config as _ai_validate_mcp_config
 from ai.models import ChatRequest as _ChatRequest
@@ -482,17 +482,48 @@ from ai.strategy import ClaudeCLIStrategy as _ClaudeCLIStrategy
 _ai_strategy = _ClaudeCLIStrategy()
 
 
+@router.get("/api/ai/chat", dependencies=auth_deps)
+async def ai_chat_history(scope: str = "vault", scope_target: str = ""):
+    """Load existing chat history for a scope. Returns empty messages list
+    if the chat note doesn't exist yet."""
+    target = scope_target or None
+    try:
+        path = _chat_storage.chat_note_path(scope, target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    chat = _chat_storage.load_chat(path)
+    return {
+        "scope": scope,
+        "scope_target": target,
+        "session_id": chat.frontmatter.get("session_id"),
+        "messages": [m.to_dict() for m in chat.messages],
+    }
+
+
 @router.post("/api/ai/chat", response_model=_ChatResponse, dependencies=auth_deps)
 async def ai_chat(req: _ChatRequest) -> _ChatResponse:
-    """Single user turn through the configured LLM strategy.
-
-    v1 Stage 2: ClaudeCLIStrategy only. Future stages add scope filtering and
-    per-tab session routing.
+    """Single user turn — loads existing chat from vault, calls LLM strategy,
+    appends both messages back to the chat note. Vault chat-note frontmatter
+    is the canonical session_id source.
     """
     cfg_path = _ai_mcp_config_path()
     _ai_validate_mcp_config(cfg_path)
-    is_continuation = req.session_id is not None
-    session_id = req.session_id or str(_uuid.uuid4())
+    scope = req.scope or "vault"
+    scope_target = req.scope_target
+
+    # Load existing chat from vault — frontmatter is canonical source of session_id
+    try:
+        chat_path = _chat_storage.chat_note_path(scope, scope_target)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    chat = _chat_storage.load_chat(chat_path)
+    is_continuation = bool(chat.messages)
+    session_id = chat.ensure_session(scope, scope_target)
+
+    # Append + persist user message immediately so refresh shows it
+    chat.append_user(req.message)
+    _chat_storage.save_chat(chat_path, chat)
+
     started_at = _time.monotonic()
     try:
         text = await _ai_strategy.chat(req.message, session_id, cfg_path, is_continuation)
@@ -502,6 +533,13 @@ async def ai_chat(req: _ChatRequest) -> _ChatResponse:
             detail=f"LLM strategy failed (exit {e.exit_code}): {e.stderr or e.stdout or 'no output'}",
         )
     elapsed_ms = int((_time.monotonic() - started_at) * 1000)
+
+    # Persist AI response
+    chat.append_assistant(text, model=_ai_strategy.model, elapsed_ms=elapsed_ms)
+    chat.frontmatter["last-updated"] = _chat_storage._now_iso()
+    chat.frontmatter["turn-count"] = sum(1 for m in chat.messages if m.role == "assistant")
+    _chat_storage.save_chat(chat_path, chat)
+
     return _ChatResponse(session_id=session_id, response=text, elapsed_ms=elapsed_ms)
 
 

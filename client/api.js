@@ -450,11 +450,23 @@ export async function saveTaskIcons(settings) {
   }
 }
 
-// AI chat — single user turn. Pass session_id to continue an existing conversation,
-// or omit to start a fresh one (server returns the new UUID).
-export async function aiChat(message, sessionId = null) {
-  const body = { message };
-  if (sessionId) body.session_id = sessionId;
+// AI chat — fetch existing chat history for a scope.
+export async function aiChatHistory(scope = "vault", scopeTarget = "") {
+  try {
+    const params = { scope };
+    if (scopeTarget) params.scope_target = scopeTarget;
+    const response = await api.get("api/ai/chat", { params });
+    return response.data; // { scope, scope_target, session_id, messages: [...] }
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+// AI chat — send a single user turn. The server resolves the canonical
+// session_id from the chat note's frontmatter; client doesn't need to track it.
+export async function aiChat(message, scope = "vault", scopeTarget = null) {
+  const body = { message, scope };
+  if (scopeTarget) body.scope_target = scopeTarget;
   try {
     const response = await api.post("api/ai/chat", body);
     return response.data; // { session_id, response, elapsed_ms }
