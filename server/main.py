@@ -524,9 +524,40 @@ async def ai_chat(req: _ChatRequest) -> _ChatResponse:
     chat.append_user(req.message)
     _chat_storage.save_chat(chat_path, chat)
 
+    # Build a scope-context system-prompt append so the AI biases its tool
+    # calls toward the current scope. The AI is free to read other notes via
+    # explicit calls; this just sets the default.
+    def _scope_prompt(s: str, t: str | None) -> str | None:
+        if s == "vault" or not t:
+            return None
+        if s == "note":
+            return (
+                f"This conversation is scoped to a single note: {t}. By default, "
+                f"focus on this note. Use read_note('{t}') as your primary source. "
+                f"You may read other notes if needed, but the user expects answers "
+                f"about this note unless they explicitly broaden the question."
+            )
+        if s == "folder":
+            return (
+                f"This conversation is scoped to the folder: {t}. When listing or "
+                f"searching notes, default to passing folder='{t}' to filter results. "
+                f"The user may ask you to crawl the wider vault explicitly."
+            )
+        if s == "tag":
+            return (
+                f"This conversation is scoped to notes tagged: {t}. When listing "
+                f"notes, default to passing tag='{t}'. The user may ask you to "
+                f"crawl the wider vault explicitly."
+            )
+        return None
+
+    system_append = _scope_prompt(scope, scope_target)
+
     started_at = _time.monotonic()
     try:
-        text = await _ai_strategy.chat(req.message, session_id, cfg_path, is_continuation)
+        text = await _ai_strategy.chat(
+            req.message, session_id, cfg_path, is_continuation, system_append
+        )
     except _ClaudeCLIError as e:
         raise HTTPException(
             status_code=502,

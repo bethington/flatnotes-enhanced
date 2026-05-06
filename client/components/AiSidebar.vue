@@ -47,43 +47,52 @@
       </div>
     </div>
 
-    <!-- Tab strip — Stage 3 ships Vault tab only.
-         Stages 7+ enable Note/Folder/Tag tabs conditionally. -->
+    <!-- Tab strip: Vault always; Note/Folder/Tag visible only when current
+         context provides a target. AI tools default-filter by the active tab's
+         scope (see backend scope-context system prompt). -->
     <div
       class="flex border-b border-theme-border shrink-0 bg-theme-background-secondary"
     >
       <button
-        :class="[
-          'flex-1 px-3 py-2 text-xs font-medium transition-colors',
-          activeTab === 'vault'
-            ? 'text-theme-text border-b-2 border-theme-accent'
-            : 'text-theme-text-muted hover:text-theme-text',
-        ]"
-        @click="activeTab = 'vault'"
+        :class="tabClass('vault')"
+        @click="setActiveTab('vault')"
+        :title="`Chat scoped to entire vault`"
       >
         🗂️ Vault
       </button>
       <button
-        disabled
-        class="flex-1 px-3 py-2 text-xs font-medium text-theme-text-very-muted cursor-not-allowed opacity-50"
-        title="Coming in Stage 7"
+        v-if="noteTabAvailable"
+        :class="tabClass('note')"
+        @click="setActiveTab('note')"
+        :title="`Chat scoped to: ${currentNote}`"
       >
         📄 Note
       </button>
       <button
-        disabled
-        class="flex-1 px-3 py-2 text-xs font-medium text-theme-text-very-muted cursor-not-allowed opacity-50"
-        title="Coming in Stage 7"
+        v-if="folderTabAvailable"
+        :class="tabClass('folder')"
+        @click="setActiveTab('folder')"
+        :title="`Chat scoped to folder: ${currentFolder}`"
       >
         📁 Folder
       </button>
       <button
-        disabled
-        class="flex-1 px-3 py-2 text-xs font-medium text-theme-text-very-muted cursor-not-allowed opacity-50"
-        title="Coming in Stage 7"
+        v-if="tagTabAvailable"
+        :class="tabClass('tag')"
+        @click="setActiveTab('tag')"
+        :title="`Chat scoped to tag(s): ${currentTags.join('+')}`"
       >
         🏷️ Tag
       </button>
+    </div>
+
+    <!-- Scope target indicator below tabs (helps disambiguate which note/folder/tag) -->
+    <div
+      v-if="activeTab !== 'vault' && currentScopeTarget"
+      class="px-3 py-1.5 text-xs text-theme-text-muted border-b border-theme-border bg-theme-background-secondary truncate shrink-0"
+      :title="currentScopeTarget"
+    >
+      📎 {{ currentScopeTarget }}
     </div>
 
     <!-- Message list — scrollable. -->
@@ -182,21 +191,56 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted } from "vue";
+import { ref, watch, nextTick, onMounted, computed } from "vue";
 import { aiChat, aiChatHistory } from "../api.js";
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
+  currentNote: { type: String, default: null },     // vault-relative .md path or null
+  currentFolder: { type: String, default: null },   // vault-relative folder path or null
+  currentTags: { type: Array, default: () => [] }, // active tag filters
 });
 defineEmits(["close"]);
 
-const activeTab = ref("vault");
+const STORAGE_KEY_TAB = "fn_ai_active_tab";
+
+const activeTab = ref(localStorage.getItem(STORAGE_KEY_TAB) || "vault");
 const messages = ref([]);
 const draft = ref("");
 const sessionId = ref(null);
 const isLoading = ref(false);
 const error = ref(null);
 const messageScroll = ref(null);
+
+// ── Tab availability based on context ────────────────────────────────────────
+const noteTabAvailable = computed(() => !!props.currentNote);
+const folderTabAvailable = computed(() => !!props.currentFolder);
+const tagTabAvailable = computed(
+  () => Array.isArray(props.currentTags) && props.currentTags.length > 0
+);
+
+// ── Active scope target derived from currently-active tab ────────────────────
+const currentScopeTarget = computed(() => {
+  if (activeTab.value === "note") return props.currentNote;
+  if (activeTab.value === "folder") return props.currentFolder;
+  if (activeTab.value === "tag")
+    return [...props.currentTags].sort().join("+");
+  return null;
+});
+
+function tabClass(name) {
+  const base = "flex-1 px-3 py-2 text-xs font-medium transition-colors";
+  if (activeTab.value === name) {
+    return `${base} text-theme-text border-b-2 border-theme-accent`;
+  }
+  return `${base} text-theme-text-muted hover:text-theme-text`;
+}
+
+function setActiveTab(name) {
+  activeTab.value = name;
+  localStorage.setItem(STORAGE_KEY_TAB, name);
+  loadHistory();
+}
 
 function scrollToBottom() {
   nextTick(() => {
@@ -211,9 +255,10 @@ function newline(e) {
 }
 
 async function loadHistory() {
-  // Vault tab is the only scope wired up in v1 Stage 6; Stage 7 adds others.
+  if (!props.isOpen) return;
   try {
-    const data = await aiChatHistory("vault");
+    const target = currentScopeTarget.value || "";
+    const data = await aiChatHistory(activeTab.value, target);
     messages.value = data.messages || [];
     sessionId.value = data.session_id || null;
     error.value = null;
@@ -225,8 +270,6 @@ async function loadHistory() {
   }
 }
 
-// Reload-from-server button — useful when the chat note has been edited
-// elsewhere (Obsidian, another browser session) or after a restart.
 async function refresh() {
   await loadHistory();
 }
@@ -234,15 +277,13 @@ async function refresh() {
 async function send() {
   const text = draft.value.trim();
   if (!text || isLoading.value) return;
-  // Optimistic: show user message immediately while the round-trip runs.
-  // The server also persists this to the chat note before invoking the LLM.
   messages.value.push({ role: "user", content: text });
   draft.value = "";
   scrollToBottom();
   isLoading.value = true;
   error.value = null;
   try {
-    const data = await aiChat(text, "vault");
+    const data = await aiChat(text, activeTab.value, currentScopeTarget.value);
     sessionId.value = data.session_id;
     messages.value.push({
       role: "assistant",
@@ -262,16 +303,31 @@ async function send() {
   }
 }
 
-// Load history once the sidebar is first shown, and again whenever it
-// transitions from hidden → visible (in case another client added messages).
-watch(
-  () => props.isOpen,
-  (open) => {
-    if (open) loadHistory();
+// If the active tab becomes unavailable (e.g., user navigates away from a
+// note while on the Note tab), fall back to Vault tab gracefully.
+function ensureValidTab() {
+  if (activeTab.value === "note" && !noteTabAvailable.value) activeTab.value = "vault";
+  if (activeTab.value === "folder" && !folderTabAvailable.value) activeTab.value = "vault";
+  if (activeTab.value === "tag" && !tagTabAvailable.value) activeTab.value = "vault";
+}
+
+// Reload history when:
+//   1. sidebar opens
+//   2. active tab changes
+//   3. scope target changes (e.g., navigated to a different note while on Note tab)
+watch(() => props.isOpen, (open) => {
+  if (open) {
+    ensureValidTab();
+    loadHistory();
   }
-);
+});
+watch([noteTabAvailable, folderTabAvailable, tagTabAvailable], ensureValidTab);
+watch(currentScopeTarget, () => {
+  if (props.isOpen) loadHistory();
+});
 
 onMounted(() => {
+  ensureValidTab();
   if (props.isOpen) loadHistory();
 });
 </script>

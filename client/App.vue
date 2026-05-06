@@ -22,6 +22,9 @@
     <!-- AI Chat Sidebar (slides from right) -->
     <AiSidebar
       :isOpen="isAiSidebarOpen"
+      :currentNote="currentNote"
+      :currentFolder="currentFolder"
+      :currentTags="activeTags"
       @close="isAiSidebarOpen = false"
     />
 
@@ -63,6 +66,7 @@ import Mousetrap from "mousetrap";
 import "mousetrap/plugins/global-bind/mousetrap-global-bind";
 import { useToast } from "primevue/usetoast";
 import { computed, ref, watch, onMounted, onUnmounted } from "vue";
+// Below: derive AiSidebar's scope context from the current route.
 import { RouterView, useRoute } from "vue-router";
 
 import { apiErrorHandler, getConfig, getPrefs } from "./api.js";
@@ -172,6 +176,28 @@ getConfig()
 
 const showNavBar = computed(() => {
   return route.name !== "login";
+});
+
+// ── Scope-context for AI sidebar tabs ────────────────────────────────────────
+// Note tab is enabled when viewing a /note/<title> route.
+// Folder tab is enabled when on /search with a folder= query param (which is
+// how FolderSidebar navigates to a folder view).
+// Tag tab is enabled whenever activeTags has any entries.
+// Vault tab is always enabled.
+const currentNote = computed(() => {
+  if (route.name === "note" && route.params.title) {
+    // route.params.title may already include the .md suffix or not depending
+    // on how the link was constructed; ensure .md ext for canonical chat path
+    const t = route.params.title;
+    return t.endsWith(".md") ? t : `${t}.md`;
+  }
+  return null;
+});
+const currentFolder = computed(() => {
+  if (route.name === "search" && route.query.folder) {
+    return route.query.folder;
+  }
+  return null;
 });
 
 function toggleSearchModal() {

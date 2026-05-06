@@ -111,6 +111,7 @@ class ClaudeCLIStrategy:
         session_id: str,
         mcp_config_path: pathlib.Path,
         is_continuation: bool,
+        system_append: str | None = None,
     ) -> str:
         # First turn → --session-id creates the session
         # Continuation → --resume picks up where we left off
@@ -124,6 +125,11 @@ class ClaudeCLIStrategy:
             "--strict-mcp-config",
             "--allowedTools", ",".join(self.allowed_tools),
         ]
+        # Scope context (per-tab) is appended to the system prompt so the AI
+        # biases its tool calls toward the current scope. AI can still crawl
+        # wider via explicit calls — scope is a prior, not a prison.
+        if system_append:
+            cmd.extend(["--append-system-prompt", system_append])
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
