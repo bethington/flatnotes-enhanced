@@ -35,10 +35,13 @@ import sys
 
 VAULT = pathlib.Path(os.environ.get("FLATNOTES_PATH") or pathlib.Path.home() / "Notes" / "Notes")
 TRASH = VAULT / "_trash"
+SIDECAR_ROOT = VAULT / ".assets"
 RETENTION_DAYS_AUDIO = 90  # soft-delete audio after N days
 TRASH_DAYS_AUDIO = 7       # hard-delete from trash after N days
 
-# Folders we scan for meetings — sidecar dirs sit next to the meeting .md
+# Folders we scan for meeting sidecars — under the parallel hidden tree
+# at <vault>/.assets/<folder>/<note stem>/ so this matches both the
+# meeting note's location AND its sidecar.
 MEETING_FOLDERS = [
     "Projects/Work/Meetings",
     "Personal/Conversations",
@@ -75,12 +78,13 @@ def _read_frontmatter(note_path: pathlib.Path) -> dict:
 
 
 def _meeting_note_for_sidecar(sidecar_dir: pathlib.Path) -> pathlib.Path | None:
-    """Given `<note>.assets/`, return the corresponding `<note>.md` path
-    if it exists, else None."""
-    if not sidecar_dir.name.endswith(".assets"):
+    """Given `<vault>/.assets/<folder>/<note stem>/`, return the corresponding
+    `<vault>/<folder>/<note stem>.md` path if it exists, else None."""
+    try:
+        rel = sidecar_dir.relative_to(SIDECAR_ROOT)
+    except ValueError:
         return None
-    stem = sidecar_dir.name[: -len(".assets")]
-    candidate = sidecar_dir.parent / f"{stem}.md"
+    candidate = VAULT / rel.parent / f"{rel.name}.md"
     return candidate if candidate.exists() else None
 
 
@@ -116,13 +120,14 @@ def _trash_path_for(audio_path: pathlib.Path) -> pathlib.Path:
 
 
 def find_audio_candidates() -> list[pathlib.Path]:
-    """Return all audio files in meeting sidecars across the vault."""
+    """Return all audio files in meeting sidecars under the parallel tree."""
     out: list[pathlib.Path] = []
     for folder in MEETING_FOLDERS:
-        folder_path = VAULT / folder
-        if not folder_path.is_dir():
+        sidecar_folder = SIDECAR_ROOT / folder
+        if not sidecar_folder.is_dir():
             continue
-        for sidecar in folder_path.glob("*.assets"):
+        # Each meeting's sidecar is a direct subdir of the folder
+        for sidecar in sidecar_folder.iterdir():
             if not sidecar.is_dir():
                 continue
             for audio in sidecar.iterdir():
@@ -257,6 +262,16 @@ def main() -> int:
         len(purge["purged"]),
         len(purge["skipped_too_young_in_trash"]),
     )
+
+    # Orphan sweep — trash any sidecar dir whose paired note no longer exists.
+    LOG.info("=== orphan sidecar sweep ===")
+    import subprocess
+    sweep = pathlib.Path(__file__).parent / "sidecar-orphan-sweep.py"
+    mode = "--dry-run" if args.dry_run else "--execute"
+    proc = subprocess.run(["python3", str(sweep), mode], capture_output=True, text=True)
+    for line in (proc.stdout + proc.stderr).splitlines():
+        if line.strip():
+            LOG.info("[orphan-sweep] %s", line)
     return 0
 
 

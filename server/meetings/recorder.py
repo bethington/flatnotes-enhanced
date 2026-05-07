@@ -165,10 +165,12 @@ async def _finalize_recording(state: dict, websocket: WebSocket) -> None:
     # 3. Read the LLM-derived content out of the new note, then write it to the
     #    PLACEHOLDER's path. The URL the user is on stays stable (Decision A).
     final_content = new_note_path.read_text(encoding="utf-8")
-    # Patch frontmatter source_file to point at the sidecar location we're
-    # about to move audio to. meetings.py wrote the merged-audio's working
-    # path; we want it to reference the in-vault sidecar.
-    final_audio_relpath = f"{placeholder.stem}.assets/audio.ogg"
+    # Audio + transcript live under the hidden parallel tree at
+    # `<vault>/.assets/<note rel>/`. source_file points at it as a
+    # vault-relative path so legacy frontmatter-based resolvers still work.
+    from common.vault import sidecar_dir_for_note, vault_root
+    sidecar = sidecar_dir_for_note(placeholder)
+    final_audio_relpath = str((sidecar / "audio.ogg").relative_to(vault_root()))
     final_content = re.sub(
         r"^source_file:.*$",
         f"source_file: {final_audio_relpath}",
@@ -178,8 +180,7 @@ async def _finalize_recording(state: dict, websocket: WebSocket) -> None:
     )
     placeholder.write_text(final_content, encoding="utf-8")
 
-    # 4. Move audio + transcript into the placeholder's .assets/ sidecar
-    sidecar = placeholder.parent / f"{placeholder.stem}.assets"
+    # 4. Move audio + transcript into the placeholder's parallel-tree sidecar
     sidecar.mkdir(parents=True, exist_ok=True)
     import shutil
     sidecar_audio = sidecar / "audio.ogg"

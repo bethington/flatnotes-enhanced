@@ -30,12 +30,23 @@ METADATA_DIR = '.metadata'
 INDEX_SCHEMA_VERSION = "9"  # bumped: nested tag regex now supports /hierarchy
 
 
+SIDECAR_ROOT_NAME = ".assets"
+
+
 def _is_in_assets_sidecar(rel_filename: str) -> bool:
-    """True iff the given vault-relative filename lives inside a `<note>.assets/`
-    per-note sidecar dir. Used to keep chat.md / audio / transcript files out
-    of the folder tree and search index — they're runtime context for their
-    parent note, not standalone notes the user manages."""
-    return any(part.endswith(".assets") for part in rel_filename.split("/"))
+    """True iff the given vault-relative filename lives under the parallel
+    sidecar tree at `<vault>/.assets/`. Used to keep per-note chat.md,
+    audio.ogg, transcript.json, audio-script.md etc. out of the folder
+    tree and search index — they're runtime context for their parent
+    note, not standalone notes the user manages.
+
+    Also matches the legacy colocated `<note>.assets/` pattern for any
+    pre-migration data that lingers.
+    """
+    parts = rel_filename.split("/")
+    if parts and parts[0] == SIDECAR_ROOT_NAME:
+        return True
+    return any(part.endswith(".assets") for part in parts)
 ARCHIVE_DIR = "_archive"
 TRASH_DIR = "_trash"
 
@@ -111,6 +122,31 @@ class FileSystemNotes(BaseNotes):
             updated=meta.get("updated"),
         )
 
+    def _sidecar_dir_for_title(self, title: str) -> str:
+        """Return the absolute sidecar dir for a note title (no .md suffix).
+        e.g. "Projects/Work/Meetings/Foo" → "<vault>/.assets/Projects/Work/Meetings/Foo".
+        The dir may not exist; caller checks os.path.exists()."""
+        return os.path.join(self.storage_path, SIDECAR_ROOT_NAME,
+                            *title.split("/"))
+
+    def _move_sidecar_with_note(self, old_title: str, new_title: str) -> None:
+        """Move a note's sidecar dir to follow the note's new title. No-op if
+        the sidecar doesn't exist. Used by rename + trash + restore."""
+        old = self._sidecar_dir_for_title(old_title)
+        new = self._sidecar_dir_for_title(new_title)
+        if not os.path.isdir(old):
+            return
+        if os.path.exists(new):
+            logger.warning(f"sidecar dst exists, skipping move: {new}")
+            return
+        os.makedirs(os.path.dirname(new), exist_ok=True)
+        os.rename(old, new)
+        # Clean up empty parent dirs in the old location
+        try:
+            self._cleanup_empty_dirs(os.path.dirname(old))
+        except Exception:
+            pass
+
     def update(self, title: str, data: NoteUpdate) -> Note:
         """Update a specific note."""
         self._validate_note_path(title)
@@ -130,6 +166,9 @@ class FileSystemNotes(BaseNotes):
             old_meta_path = self._meta_path(title)
             if os.path.exists(old_meta_path):
                 os.rename(old_meta_path, self._meta_path(data.new_title))
+            # Move the per-note sidecar dir (chat.md / audio / transcript) so
+            # it stays paired with the renamed note.
+            self._move_sidecar_with_note(title, data.new_title)
             self._cleanup_empty_dirs(os.path.dirname(filepath))
             title = data.new_title
             filepath = new_filepath
@@ -176,6 +215,9 @@ class FileSystemNotes(BaseNotes):
             dst_meta = self._meta_path(trash_title)
             os.makedirs(os.path.dirname(dst_meta), exist_ok=True)
             os.rename(src_meta, dst_meta)
+        # Move the per-note sidecar dir (chat / audio / transcript) into trash
+        # so it can be restored or hard-deleted alongside its note.
+        self._move_sidecar_with_note(title, trash_title)
         self._cleanup_empty_dirs(os.path.dirname(src))
 
     def restore_from_trash(self, title: str) -> "Note":
@@ -202,6 +244,8 @@ class FileSystemNotes(BaseNotes):
             # Clean up the old metadata directory if empty
             src_meta_dir = os.path.dirname(src_meta)
             self._cleanup_empty_dirs(src_meta_dir)
+        # Restore the per-note sidecar dir alongside the note
+        self._move_sidecar_with_note(title, original_title)
         # Clean up empty directories upward from the note's original trash location
         self._cleanup_empty_dirs(os.path.dirname(src))
         content = self._read_file(dst)
@@ -227,6 +271,12 @@ class FileSystemNotes(BaseNotes):
             # Clean up empty .metadata directory
             meta_dir = os.path.dirname(meta_path)
             self._cleanup_empty_dirs(meta_dir)
+
+        # Delete the per-note sidecar dir (chat history, audio, transcript)
+        sidecar = self._sidecar_dir_for_title(title)
+        if os.path.isdir(sidecar):
+            shutil.rmtree(sidecar, ignore_errors=True)
+            self._cleanup_empty_dirs(os.path.dirname(sidecar))
 
         # Clean up empty directories upward from the note's folder
         self._cleanup_empty_dirs(os.path.dirname(filepath))
