@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.xebyte.flatnotes-audio-retention</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/python3</string>
+        <string>/Users/ben/dev/flatnotes/scripts/audio-retention.py</string>
+        <string>--execute</string>
+        <string>--log-file</string>
+        <string>/Users/ben/Library/Logs/flatnotes/audio-retention.log</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/ben/dev/flatnotes</string>
+
+    <!-- Sundays at 3 AM (per curator plan WS24) -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>0</integer>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- If the Mac is asleep at 3 AM Sunday, run on next wake -->
+    <key>StartOnMount</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/ben/Library/Logs/flatnotes/audio-retention.out</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/ben/Library/Logs/flatnotes/audio-retention.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>FLATNOTES_PATH</key>
+        <string>/Users/ben/Notes/Notes</string>
+    </dict>
+</dict>
+</plist>
