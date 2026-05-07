@@ -16,7 +16,7 @@ cd "$ROOT"
 # order is .venv/bin -> /opt/homebrew/bin -> /usr/local/bin -> default. If
 # this export came AFTER `source .venv/bin/activate`, it would clobber the
 # venv's prepend and `python` would resolve to homebrew (no uvicorn there).
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 # Activate venv
 # shellcheck disable=SC1091
