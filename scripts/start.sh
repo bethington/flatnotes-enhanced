@@ -8,6 +8,16 @@ set -euo pipefail
 ROOT="/Users/ben/dev/flatnotes"
 cd "$ROOT"
 
+# LaunchAgent inherits a minimal PATH that excludes /opt/homebrew/bin and
+# /usr/local/bin, where most user-installed CLIs live (claude, ffmpeg, docker,
+# git, etc.). Subprocesses spawned from this server (voiceprints.py exec'ing
+# `docker`, ffmpeg concat, claude CLI) need these on PATH. Setting it BEFORE
+# the venv activation matters: the venv prepends its own bin/, so the final
+# order is .venv/bin -> /opt/homebrew/bin -> /usr/local/bin -> default. If
+# this export came AFTER `source .venv/bin/activate`, it would clobber the
+# venv's prepend and `python` would resolve to homebrew (no uvicorn there).
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Activate venv
 # shellcheck disable=SC1091
 source "$ROOT/.venv/bin/activate"
