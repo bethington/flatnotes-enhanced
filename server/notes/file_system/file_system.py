@@ -28,6 +28,14 @@ MARKDOWN_EXT = ".md"
 META_EXT = ".meta.json"  # sidecar metadata file (timestamps)
 METADATA_DIR = '.metadata'
 INDEX_SCHEMA_VERSION = "9"  # bumped: nested tag regex now supports /hierarchy
+
+
+def _is_in_assets_sidecar(rel_filename: str) -> bool:
+    """True iff the given vault-relative filename lives inside a `<note>.assets/`
+    per-note sidecar dir. Used to keep chat.md / audio / transcript files out
+    of the folder tree and search index — they're runtime context for their
+    parent note, not standalone notes the user manages."""
+    return any(part.endswith(".assets") for part in rel_filename.split("/"))
 ARCHIVE_DIR = "_archive"
 TRASH_DIR = "_trash"
 
@@ -619,11 +627,21 @@ class FileSystemNotes(BaseNotes):
         )
 
     def _list_all_note_filenames(self) -> List[str]:
-        """Return list of all .md filenames relative to storage_path (includes subdirs)."""
+        """Return list of all .md filenames relative to storage_path (includes subdirs).
+
+        Skips hidden dirs (.flatnotes, .metadata, .obsidian) and per-note
+        sidecar dirs (`<note>.assets/`). The sidecar dirs hold per-note
+        AI chat history (`chat.md`), recorded audio + transcripts — files
+        that are part of the note's runtime context, not standalone notes
+        the user manages, so they should not appear in the folder tree
+        or search index.
+        """
         results = []
         for dirpath, dirnames, filenames in os.walk(self.storage_path):
-            # Skip hidden directories (like .flatnotes, .metadata)
-            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".") and not d.endswith(".assets")
+            ]
             for fname in filenames:
                 if fname.endswith(MARKDOWN_EXT):
                     full = os.path.join(dirpath, fname)
@@ -644,7 +662,12 @@ class FileSystemNotes(BaseNotes):
                 idx_filepath = os.path.join(
                     self.storage_path, idx_filename.replace("/", os.sep)
                 )
-                if not os.path.exists(idx_filepath):
+                # Drop entries that no longer exist OR live inside a per-note
+                # `<note>.assets/` sidecar dir. The walker now skips those
+                # dirs, so chat.md / audio sidecars shouldn't pollute the
+                # folder tree or search results — but already-indexed entries
+                # stick around without this explicit reconcile.
+                if not os.path.exists(idx_filepath) or _is_in_assets_sidecar(idx_filename):
                     writer.delete_by_term("filename", idx_filename)
                     logger.info(f"'{idx_filename}' removed from index")
                 elif (
