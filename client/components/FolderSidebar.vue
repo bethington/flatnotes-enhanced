@@ -8,7 +8,7 @@
 
   <aside
     :class="[
-      'fixed top-0 left-0 z-40 h-full w-72 flex flex-col',
+      'fixed top-0 left-0 z-40 h-full w-full sm:w-96 flex flex-col',
       'bg-theme-background border-r border-theme-border',
       'transition-transform duration-300 ease-in-out',
       isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -152,9 +152,9 @@
         
         <!-- Modal positioned near sidebar -->
         <div
-          class="relative mt-2 ml-[calc(18rem+0.5rem)] w-80 move-folder-modal"
+          class="relative mt-2 ml-[calc(24rem+0.5rem)] w-80 move-folder-modal"
           :class="{
-            'ml-[calc(18rem+0.5rem)]': isOpen,
+            'ml-[calc(24rem+0.5rem)]': isOpen,
             'ml-2': !isOpen
           }"
         >
@@ -324,7 +324,7 @@
         <div class="fixed inset-0 bg-black/20 backdrop-blur-sm" @click="closeDeleteDialog"></div>
         <div
           class="relative mt-2 move-folder-modal w-80"
-          :class="isOpen ? 'ml-[calc(18rem+0.5rem)]' : 'ml-2'"
+          :class="isOpen ? 'ml-[calc(24rem+0.5rem)]' : 'ml-2'"
         >
           <div class="bg-theme-background rounded-lg shadow-xl border border-theme-border overflow-hidden">
             <div class="flex items-center justify-between px-4 py-3 border-b border-theme-border bg-theme-background-elevated">
