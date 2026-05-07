@@ -105,6 +105,9 @@ class ClaudeCLIStrategy:
             "mcp__flatnotes__add_tag",
             "mcp__flatnotes__remove_tag",
             "mcp__meetings__transcribe_audio",
+            "mcp__meetings__list_unknown_speakers_in_meeting",
+            "mcp__meetings__enroll_voiceprint",
+            "mcp__meetings__relabel_speakers_in_note",
         )
 
     async def chat(

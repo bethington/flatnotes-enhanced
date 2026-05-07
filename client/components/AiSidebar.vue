@@ -330,4 +330,23 @@ onMounted(() => {
   ensureValidTab();
   if (props.isOpen) loadHistory();
 });
+
+// Public method invoked by App.vue when the user clicks the
+// "Identify Now" button in a meeting note's speaker-label banner.
+// Switches to the requested scope tab and pre-fills the chat input
+// with a structured prompt that gets the labeling flow rolling.
+function startSpeakerLabelingFlow(scope = "note") {
+  if (scope === "note" && noteTabAvailable.value) {
+    setActiveTab("note");
+  }
+  draft.value =
+    "Help me identify the unknown speakers in this meeting. " +
+    "Use list_unknown_speakers_in_meeting to get the list, then for " +
+    "each one tell me the longest quote + timestamp. I'll respond with " +
+    "the person's name. After each name, call enroll_voiceprint to add " +
+    "their sample to the registry, then call relabel_speakers_in_note " +
+    "to update this note. Walk me through them one at a time.";
+}
+
+defineExpose({ startSpeakerLabelingFlow });
 </script>

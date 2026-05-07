@@ -116,6 +116,12 @@
 
       <hr class="my-4 border-theme-border" />
 
+      <!-- Speaker-label banner: shows when meeting note has unmapped SPEAKER_NN labels -->
+      <SpeakerLabelBanner
+        :noteContent="note.content || ''"
+        @identify="$emit('open-ai-sidebar', 'note')"
+      />
+
       <!-- Content -->
       <div class="flex-1 min-h-0">
         <ToastEditor
@@ -215,6 +221,12 @@
         <hr class="my-4 border-theme-border" />
       </div>
 
+      <!-- Speaker-label banner (view mode) -->
+      <SpeakerLabelBanner
+        :noteContent="note.content || ''"
+        @identify="$emit('open-ai-sidebar', 'note')"
+      />
+
       <!-- Scrollable Content Area -->
       <div class="flex-1 overflow-y-auto min-h-0">
         <ToastViewer
@@ -306,6 +318,7 @@ import LoadingIndicator from "../components/LoadingIndicator.vue";
 import Toggle from "../components/Toggle.vue";
 import ToastEditor from "../components/toastui/ToastEditor.vue";
 import ToastViewer from "../components/toastui/ToastViewer.vue";
+import SpeakerLabelBanner from "../components/SpeakerLabelBanner.vue";
 import { authTypes } from "../constants.js";
 import { useGlobalStore } from "../globalStore.js";
 import { getToastOptions } from "../helpers.js";
@@ -314,6 +327,7 @@ import { isCurrentTokenStored } from "../tokenStorage.js";
 const props = defineProps({
   title: String,
 });
+defineEmits(["open-ai-sidebar"]);
 
 const route = useRoute();
 const canModify = computed(

@@ -21,6 +21,7 @@
 
     <!-- AI Chat Sidebar (slides from right) -->
     <AiSidebar
+      ref="aiSidebar"
       :isOpen="isAiSidebarOpen"
       :currentNote="currentNote"
       :currentFolder="currentFolder"
@@ -65,7 +66,7 @@
 
       <!-- Scrollable content area -->
       <div class="flex-1 overflow-y-auto min-h-0">
-        <RouterView :activeTags="activeTags" />
+        <RouterView :activeTags="activeTags" @open-ai-sidebar="onOpenAiSidebar" />
       </div>
     </div>
   </LoadingIndicator>
@@ -255,6 +256,17 @@ function startRecording() {
 
 function onRecorderStateChanged(s) {
   isRecording.value = s === "recording" || s === "stopping" || s === "connecting";
+}
+
+// Handle open-ai-sidebar event from Note.vue's SpeakerLabelBanner.
+// Opens the sidebar, switches to the Note tab, and pre-fills a starter
+// prompt that walks the user through unknown-speaker labeling.
+const aiSidebar = ref();
+function onOpenAiSidebar(scope = "note") {
+  isAiSidebarOpen.value = true;
+  if (aiSidebar.value && aiSidebar.value.startSpeakerLabelingFlow) {
+    aiSidebar.value.startSpeakerLabelingFlow(scope);
+  }
 }
 
 function handleTagsChanged(tags) {
