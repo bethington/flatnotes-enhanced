@@ -108,6 +108,8 @@ class ClaudeCLIStrategy:
             "mcp__meetings__list_unknown_speakers_in_meeting",
             "mcp__meetings__enroll_voiceprint",
             "mcp__meetings__relabel_speakers_in_note",
+            "mcp__meetings__re_identify_meeting",
+            "mcp__meetings__re_identify_all_meetings",
         )
 
     async def chat(
