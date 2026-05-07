@@ -152,6 +152,14 @@ async function onDrop(e) {
   e.preventDefault();
   dragDepth = 0;
   isDragging.value = false;
+  // Reject a second drop while an upload/transcription is still running —
+  // there's only one global progress indicator and the backend pipeline
+  // serialises anyway.
+  if (status.value === "uploading" || status.value === "transcribing") {
+    status.value = "error";
+    errorMessage.value = `Already transcribing ${activeFileName.value} — wait for it to finish before dropping another file.`;
+    return;
+  }
   const files = Array.from(e.dataTransfer.files || []);
   if (files.length === 0) return;
   const file = files.find(isAudioFile);

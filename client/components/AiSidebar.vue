@@ -6,10 +6,12 @@
     @click="$emit('close')"
   ></div>
 
-  <!-- Sidebar slides in from the right (matches FolderSidebar pattern but mirrored). -->
+  <!-- Sidebar slides in from the right (matches FolderSidebar pattern but mirrored).
+       w-full on phones (single-column) so the close button stays reachable;
+       w-96 on sm+ keeps the underlying note partially visible. -->
   <aside
     :class="[
-      'fixed top-0 right-0 z-40 h-full w-96 flex flex-col',
+      'fixed top-0 right-0 z-40 h-full w-full sm:w-96 flex flex-col',
       'bg-theme-background border-l border-theme-border',
       'transition-transform duration-300 ease-in-out',
       isOpen ? 'translate-x-0' : 'translate-x-full',
