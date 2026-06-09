@@ -616,6 +616,15 @@ router.include_router(_meetings_router)
 router.include_router(_recorder_router)
 # endregion
 
+# region Folders (bulk upload + zip download)
+from folders.routes import router as _folders_router  # noqa: E402
+
+# Apply auth_deps to every route in the folders router (same posture as above).
+for r in _folders_router.routes:
+    r.dependencies = list(getattr(r, "dependencies", []) or []) + list(auth_deps)
+router.include_router(_folders_router)
+# endregion
+
 app.include_router(router, prefix=global_config.path_prefix)
 app.mount(
     global_config.path_prefix,
