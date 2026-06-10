@@ -8,7 +8,7 @@
 
   <aside
     :class="[
-      'fixed top-0 left-0 z-40 h-full w-72 flex flex-col',
+      'fixed top-0 left-0 z-40 h-full w-full sm:w-96 flex flex-col',
       'bg-theme-background border-r border-theme-border',
       'transition-transform duration-300 ease-in-out',
       isOpen ? 'translate-x-0' : '-translate-x-full',
@@ -68,6 +68,106 @@
             <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
           </svg>
         </button>
+        <!-- New folder (created inside the active folder) -->
+        <div class="relative">
+          <button
+            @click="toggleNewFolderPopover"
+            class="text-theme-text-muted hover:text-theme-text transition-colors p-1 rounded"
+            :class="{ 'text-theme-brand': showNewFolderPopover }"
+            :title="`New folder in ${activeFolder || 'Root'}`"
+          >
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+              <path d="M20,6A2,2 0 0,1 22,8V18A2,2 0 0,1 20,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H20M19,14H17V12H15V14H13V16H15V18H17V16H19V14Z"/>
+            </svg>
+          </button>
+          <!-- Outside-click catcher -->
+          <div v-if="showNewFolderPopover" class="fixed inset-0 z-40" @click="cancelNewTopFolder"></div>
+          <!-- New folder popover -->
+          <div
+            v-if="showNewFolderPopover"
+            class="absolute right-0 mt-1 z-50 w-64 bg-theme-background border border-theme-border rounded-md shadow-lg p-3"
+          >
+            <div class="text-xs text-theme-text-muted mb-1.5 font-medium">
+              New folder in <span class="text-theme-text font-semibold">{{ activeFolder || 'Root' }}</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <input
+                ref="newTopFolderInputEl"
+                v-model="newTopFolderName"
+                type="text"
+                placeholder="Folder name"
+                class="flex-1 min-w-0 text-sm bg-theme-background border border-theme-border rounded px-2 py-1 outline-none focus:border-theme-brand text-theme-text placeholder-theme-text-very-muted"
+                @keydown.enter.prevent="confirmNewTopFolder"
+                @keydown.escape.prevent="cancelNewTopFolder"
+              />
+              <button
+                @click="confirmNewTopFolder"
+                :disabled="creatingFolder"
+                class="shrink-0 p-1 rounded text-theme-brand hover:bg-theme-brand/10 transition-colors disabled:opacity-40"
+                title="Create folder"
+              >
+                <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+                  <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+              </button>
+            </div>
+            <p v-if="newTopFolderError" class="text-xs text-red-500 mt-1">{{ newTopFolderError }}</p>
+            <p v-else class="text-xs text-theme-text-very-muted mt-1 leading-snug">
+              Use / for nested folders. A starter "Untitled" note is added so the folder shows.
+            </p>
+          </div>
+        </div>
+        <!-- Upload files / folder into the active folder -->
+        <div class="relative">
+          <button
+            @click="showUploadMenu = !showUploadMenu"
+            class="text-theme-text-muted hover:text-theme-text transition-colors p-1 rounded"
+            :class="{ 'animate-pulse text-theme-brand': uploading }"
+            :title="`Upload into ${activeFolder || 'Root'}`"
+          >
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+              <path d="M14,13V17H10V13H7L12,8L17,13M19.35,10.04C18.67,6.59 15.64,4 12,4C9.11,4 6.6,5.64 5.35,8.04C2.34,8.36 0,10.91 0,14A6,6 0 0,0 6,20H19A5,5 0 0,0 24,15C24,12.36 21.95,10.22 19.35,10.04Z"/>
+            </svg>
+          </button>
+          <!-- Outside-click catcher -->
+          <div v-if="showUploadMenu" class="fixed inset-0 z-40" @click="showUploadMenu = false"></div>
+          <!-- Upload menu -->
+          <div
+            v-if="showUploadMenu"
+            class="absolute right-0 mt-1 z-50 w-44 bg-theme-background border border-theme-border rounded-md shadow-lg overflow-hidden"
+          >
+            <button
+              @click="triggerFilePick"
+              class="w-full text-left px-3 py-2 text-sm text-theme-text hover:bg-theme-background-elevated flex items-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current shrink-0 opacity-70">
+                <path d="M13,9V3.5L18.5,9M6,2C4.89,2 4,2.89 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2H6Z"/>
+              </svg>
+              Upload files…
+            </button>
+            <button
+              @click="triggerDirPick"
+              class="w-full text-left px-3 py-2 text-sm text-theme-text hover:bg-theme-background-elevated flex items-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current shrink-0 opacity-70">
+                <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
+              </svg>
+              Upload folder…
+            </button>
+          </div>
+        </div>
+        <!-- Download active folder (or whole vault) as a zip -->
+        <button
+          @click="downloadActiveFolder"
+          class="text-theme-text-muted hover:text-theme-text transition-colors p-1 rounded"
+          :class="{ 'animate-pulse text-theme-brand': downloading }"
+          :title="`Download ${activeFolder || 'whole vault'} as zip`"
+        >
+          <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+            <path d="M5,20H19V18H5M19,9H15V3H9V9H5L12,16L19,9Z"/>
+          </svg>
+        </button>
+
         <!-- Selection mode toggle -->
         <button
           @click="toggleSelectionMode"
@@ -91,6 +191,11 @@
         </button>
       </div>
     </div>
+
+    <!-- Hidden upload inputs (files vs. directory). webkitdirectory makes the
+         browser supply each file's webkitRelativePath, preserving structure. -->
+    <input ref="fileInputEl" type="file" multiple class="hidden" @change="onFilesPicked($event, false)" />
+    <input ref="dirInputEl" type="file" webkitdirectory directory multiple class="hidden" @change="onFilesPicked($event, true)" />
 
     <!-- Folder list -->
     <div class="flex-1 overflow-y-auto px-2 py-2">
@@ -152,9 +257,9 @@
         
         <!-- Modal positioned near sidebar -->
         <div
-          class="relative mt-2 ml-[calc(18rem+0.5rem)] w-80 move-folder-modal"
+          class="relative mt-2 ml-[calc(24rem+0.5rem)] w-80 move-folder-modal"
           :class="{
-            'ml-[calc(18rem+0.5rem)]': isOpen,
+            'ml-[calc(24rem+0.5rem)]': isOpen,
             'ml-2': !isOpen
           }"
         >
@@ -324,7 +429,7 @@
         <div class="fixed inset-0 bg-black/20 backdrop-blur-sm" @click="closeDeleteDialog"></div>
         <div
           class="relative mt-2 move-folder-modal w-80"
-          :class="isOpen ? 'ml-[calc(18rem+0.5rem)]' : 'ml-2'"
+          :class="isOpen ? 'ml-[calc(24rem+0.5rem)]' : 'ml-2'"
         >
           <div class="bg-theme-background rounded-lg shadow-xl border border-theme-border overflow-hidden">
             <div class="flex items-center justify-between px-4 py-3 border-b border-theme-border bg-theme-background-elevated">
@@ -398,7 +503,7 @@ import { ref, computed, watch, onMounted, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import { useToast } from "primevue/usetoast";
 
-import { getFolders, getFolderNotes, updateNote, getNote, createNote, deleteNote } from "../api.js";
+import { getFolders, getFolderNotes, updateNote, getNote, createNote, deleteNote, uploadFolder, downloadFolder } from "../api.js";
 import FolderItem from "./FolderItem.vue";
 import { getToastOptions } from "../helpers.js";
 
@@ -433,6 +538,130 @@ const newFolderInputEl   = ref(null);
 
 // ── Folder search state ────────────────────────────────────────────────────
 const folderSearchQuery = ref("");
+
+// ── New-folder (header button) state ─────────────────────────────────────────
+// Distinct from the Move-dialog's new-folder state (showNewFolderInput etc.),
+// which creates a folder only as a move/duplicate target.
+const showNewFolderPopover = ref(false);
+const newTopFolderName     = ref("");
+const newTopFolderError    = ref("");
+const newTopFolderInputEl  = ref(null);
+const creatingFolder       = ref(false);
+
+function toggleNewFolderPopover() {
+  showNewFolderPopover.value = !showNewFolderPopover.value;
+  if (showNewFolderPopover.value) {
+    newTopFolderName.value  = "";
+    newTopFolderError.value = "";
+    nextTick(() => newTopFolderInputEl.value?.focus());
+  }
+}
+
+function cancelNewTopFolder() {
+  showNewFolderPopover.value = false;
+  newTopFolderName.value     = "";
+  newTopFolderError.value    = "";
+}
+
+// flatnotes folders are implicit (a folder exists because a note lives in it),
+// so we materialise a new folder by creating a starter "Untitled" note inside
+// it. The folder is created relative to the currently active folder.
+async function confirmNewTopFolder() {
+  const name  = newTopFolderName.value.trim();
+  const error = validateFolderName(name);
+  if (error) {
+    newTopFolderError.value = error;
+    return;
+  }
+  const base       = activeFolder.value || "";
+  const folderPath = base ? `${base}/${name}` : name;
+  const starter    = `${folderPath}/Untitled`;
+
+  creatingFolder.value = true;
+  try {
+    await createNote(starter, "");
+    cancelNewTopFolder();
+    toast.add(getToastOptions(`Created folder "${folderPath}"`, "Folder created", "success"));
+    await loadFolders();
+    navigate(folderPath);
+  } catch (err) {
+    if (err.response?.status === 409) {
+      newTopFolderError.value = "That folder already has an Untitled note.";
+    } else {
+      console.error("Create folder failed:", err);
+      newTopFolderError.value = "Could not create folder. See console.";
+    }
+  } finally {
+    creatingFolder.value = false;
+  }
+}
+
+// ── Upload / download state ──────────────────────────────────────────────────
+const fileInputEl    = ref(null);
+const dirInputEl     = ref(null);
+const showUploadMenu = ref(false);
+const uploading      = ref(false);
+const downloading    = ref(false);
+
+function triggerFilePick() {
+  showUploadMenu.value = false;
+  fileInputEl.value?.click();
+}
+
+function triggerDirPick() {
+  showUploadMenu.value = false;
+  dirInputEl.value?.click();
+}
+
+// Shared handler for both the file picker and the folder picker. Uploads land
+// in the currently active folder (root when "All Notes" is selected).
+async function onFilesPicked(event, isDir) {
+  const picked = Array.from(event.target.files || []);
+  event.target.value = ""; // reset so picking the same file(s) re-fires change
+  if (picked.length === 0) return;
+
+  const dest  = activeFolder.value || "";
+  const files = [];
+  const paths = [];
+  for (const f of picked) {
+    files.push(f);
+    // Folder pick → webkitRelativePath ("proj/src/a.js"); file pick → bare name.
+    paths.push((isDir && f.webkitRelativePath) ? f.webkitRelativePath : f.name);
+  }
+
+  uploading.value = true;
+  try {
+    const res = await uploadFolder(files, paths, dest, false);
+    const destLabel = dest || "Root";
+    let msg = `Uploaded ${res.written_count} file${res.written_count === 1 ? "" : "s"} to "${destLabel}"`;
+    if (res.skipped_count > 0) {
+      msg += ` — skipped ${res.skipped_count} that already existed`;
+    }
+    toast.add(getToastOptions(msg, "Upload complete", res.skipped_count > 0 ? "warn" : "success"));
+    await loadFolders();
+  } catch (error) {
+    console.error("Folder upload failed:", error);
+    toast.add(getToastOptions("Upload failed. See console for details.", "Error", "error"));
+  } finally {
+    uploading.value = false;
+  }
+}
+
+async function downloadActiveFolder() {
+  const path = activeFolder.value || "";
+  if (!path && !window.confirm("Download the ENTIRE vault as a zip? This may be large.")) {
+    return;
+  }
+  downloading.value = true;
+  try {
+    await downloadFolder(path);
+  } catch (error) {
+    console.error("Folder download failed:", error);
+    toast.add(getToastOptions("Download failed. See console for details.", "Error", "error"));
+  } finally {
+    downloading.value = false;
+  }
+}
 
 const totalCount = computed(() => {
   let total = 0;

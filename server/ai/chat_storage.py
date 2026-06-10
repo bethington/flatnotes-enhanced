@@ -144,29 +144,12 @@ class ChatNote:
 def chat_note_path(scope: str, scope_target: str | None = None) -> pathlib.Path:
     """Resolve the vault path of the chat note for the given scope.
 
-    v1 Stage 6: only `vault` is wired up. Stage 7 enables note/folder/tag.
+    All chat files live under `<vault>/.assets/` — see common.vault
+    sidecar_for_chat_scope for the full layout. The hidden `.assets/`
+    parent keeps chats out of the folder tree + search index.
     """
-    root = _vault_root()
-    if scope == "vault":
-        return root / "_AI Chats" / "_vault.md"
-    if scope == "note":
-        if not scope_target:
-            raise ValueError("scope=note requires scope_target")
-        # <vault>/<note path>.assets/chat.md
-        note_path = pathlib.Path(scope_target)
-        if note_path.suffix != ".md":
-            raise ValueError(f"scope_target must end in .md: {scope_target}")
-        return root / note_path.with_suffix("").with_suffix(".assets") / "chat.md"
-    if scope == "folder":
-        if not scope_target:
-            raise ValueError("scope=folder requires scope_target")
-        return root / scope_target / "_chat.md"
-    if scope == "tag":
-        if not scope_target:
-            raise ValueError("scope=tag requires scope_target")
-        # Allow multi-tag intersections via "+" joining (tags can't contain "+")
-        return root / "_AI Chats" / "tags" / f"{scope_target}.md"
-    raise ValueError(f"unknown scope: {scope}")
+    from common.vault import sidecar_for_chat_scope
+    return sidecar_for_chat_scope(scope, scope_target, root=_vault_root())
 
 
 def load_chat(path: pathlib.Path) -> ChatNote:

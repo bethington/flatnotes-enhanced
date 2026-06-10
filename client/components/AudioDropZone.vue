@@ -24,29 +24,46 @@
     </div>
   </div>
 
-  <!-- Status bar shown while transcription is running (spans top of page). -->
+  <!-- Status bar shown while upload + transcription is running (spans top of page). -->
   <div
     v-if="status === 'uploading' || status === 'transcribing'"
     class="fixed top-0 left-0 right-0 z-50 bg-theme-accent text-white text-sm px-4 py-2 flex items-center gap-3"
   >
-    <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current animate-spin">
+    <svg viewBox="0 0 24 24" class="w-5 h-5 fill-current animate-spin shrink-0">
       <path d="M12,4V2A10,10 0 0,0 2,12H4A8,8 0 0,1 12,4Z" />
     </svg>
     <span class="flex-1 truncate">
-      <span v-if="status === 'uploading'">Uploading {{ activeFileName }}…</span>
+      <span v-if="status === 'uploading'">
+        Uploading {{ activeFileName }}
+        <span v-if="uploadPercent !== null">— {{ uploadPercent }}%</span>
+        <span v-else>… {{ elapsedSeconds }}s</span>
+      </span>
       <span v-else>
-        Transcribing {{ activeFileName }} ({{ elapsedSeconds }}s elapsed —
-        ~5-10 min for a typical meeting)
+        Transcribing {{ activeFileName }} — {{ elapsedSeconds }}s elapsed
+        <span class="opacity-75">(typically 5–10 min for a 30-min meeting)</span>
       </span>
     </span>
     <button
       v-if="status === 'transcribing'"
       @click="abort"
-      class="text-xs underline opacity-80 hover:opacity-100"
-      title="Note: cannot actually cancel the server-side pipeline; this only hides the indicator. The transcription will still complete and appear in your vault."
+      class="text-xs underline opacity-80 hover:opacity-100 shrink-0"
+      title="Hides the indicator. Transcription continues server-side and the meeting note will appear in your vault when done."
     >
       Hide
     </button>
+  </div>
+
+  <!-- Large-file tip — appears for ~6s after a drop > 50MB -->
+  <div
+    v-if="largeFileTip"
+    class="fixed top-12 right-4 z-50 max-w-sm bg-amber-500/15 border border-amber-500/40 rounded-lg shadow-lg p-3 text-xs text-theme-text"
+  >
+    <div class="font-semibold text-amber-500 mb-1">Heads up: large file ({{ largeFileTip.sizeLabel }})</div>
+    <div>
+      Re-encoding to OGG/Opus would shrink this to ~{{ largeFileTip.estimateOgg }} and
+      upload in seconds. For future drops:
+      <code class="text-xs">ffmpeg -i in.wav -c:a libopus -b:a 64k out.ogg</code>
+    </div>
   </div>
 
   <!-- Toast on completion -->
@@ -118,11 +135,17 @@ const isDragging = ref(false);
 const status = ref("idle"); // idle | uploading | transcribing | done | error
 const activeFileName = ref("");
 const elapsedSeconds = ref(0);
+const uploadPercent = ref(null); // 0..100 while uploading, null once upload is done
 const lastResult = ref(null);
 const errorMessage = ref("");
+const largeFileTip = ref(null); // {sizeLabel, estimateOgg} | null
 
 let dragDepth = 0; // count of nested dragenter/dragleave events
 let elapsedTimer = null;
+let largeFileTipTimer = null;
+let activeXhr = null;
+
+const LARGE_FILE_BYTES = 50 * 1024 * 1024;
 
 const ALLOWED_EXT = [
   ".wav", ".ogg", ".mp3", ".m4a", ".opus", ".flac", ".aac", ".webm",
@@ -152,6 +175,14 @@ async function onDrop(e) {
   e.preventDefault();
   dragDepth = 0;
   isDragging.value = false;
+  // Reject a second drop while an upload/transcription is still running —
+  // there's only one global progress indicator and the backend pipeline
+  // serialises anyway.
+  if (status.value === "uploading" || status.value === "transcribing") {
+    status.value = "error";
+    errorMessage.value = `Already transcribing ${activeFileName.value} — wait for it to finish before dropping another file.`;
+    return;
+  }
   const files = Array.from(e.dataTransfer.files || []);
   if (files.length === 0) return;
   const file = files.find(isAudioFile);
@@ -163,52 +194,102 @@ async function onDrop(e) {
   await uploadAndTranscribe(file);
 }
 
-async function uploadAndTranscribe(file) {
+function formatBytes(n) {
+  if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+  if (n >= 1024 * 1024) return `${Math.round(n / 1024 / 1024)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+function maybeShowLargeFileTip(file) {
+  if (file.size < LARGE_FILE_BYTES) return;
+  // Opus at 64kbps ≈ 8 KB/s. WAV (PCM 16-bit mono 44.1kHz) ≈ 88 KB/s.
+  // So OGG-Opus rough estimate is file.size * 8 / 88, but capped sensibly.
+  const ratio = file.name.toLowerCase().endsWith(".wav") ? 11 : 4;
+  const estBytes = Math.max(file.size / ratio, 256 * 1024);
+  largeFileTip.value = {
+    sizeLabel: formatBytes(file.size),
+    estimateOgg: formatBytes(estBytes),
+  };
+  if (largeFileTipTimer) clearTimeout(largeFileTipTimer);
+  largeFileTipTimer = setTimeout(() => { largeFileTip.value = null; }, 8000);
+}
+
+function uploadAndTranscribe(file) {
   activeFileName.value = file.name;
   status.value = "uploading";
+  uploadPercent.value = 0;
   errorMessage.value = "";
   lastResult.value = null;
+  maybeShowLargeFileTip(file);
+
   const fd = new FormData();
   fd.append("audio_file", file);
   fd.append("category", "work"); // Stage 9: defaults to work; Stage 11+ adds modal for picking
+
   const startTime = Date.now();
   elapsedSeconds.value = 0;
   if (elapsedTimer) clearInterval(elapsedTimer);
   elapsedTimer = setInterval(() => {
     elapsedSeconds.value = Math.round((Date.now() - startTime) / 1000);
   }, 1000);
-  try {
-    const res = await fetch("/api/meetings/upload", {
-      method: "POST",
-      body: fd,
-      headers: getAuthHeader(),
-    });
-    if (res.ok) {
-      // Switch indicator from "uploading" to "transcribing" after upload completes
-      status.value = "transcribing";
+
+  // XMLHttpRequest (rather than fetch) so we can hook upload.onprogress +
+  // upload.onload — fetch's promise only resolves once the entire response
+  // arrives, which with our synchronous /api/meetings/upload means the
+  // status bar would be stuck on "Uploading" for the full 5–10 min while
+  // the server-side pipeline runs.
+  const xhr = new XMLHttpRequest();
+  activeXhr = xhr;
+  xhr.open("POST", "/api/meetings/upload");
+  const tok = getStoredToken();
+  if (tok) xhr.setRequestHeader("Authorization", `Bearer ${tok}`);
+
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable && status.value === "uploading") {
+      uploadPercent.value = Math.round((e.loaded / e.total) * 100);
     }
-    const data = await res.json();
-    if (!res.ok) {
-      throw new Error(data.detail || `HTTP ${res.status}`);
+  };
+  // Upload bytes fully sent → server is now running the pipeline. Flip the
+  // indicator immediately so the user knows the wait shifted from network
+  // I/O to GPU transcription.
+  xhr.upload.onload = () => {
+    status.value = "transcribing";
+    uploadPercent.value = null;
+  };
+  xhr.upload.onerror = () => finishWithError("upload failed");
+  xhr.upload.onabort = () => finishWithError("upload aborted");
+
+  xhr.onload = () => {
+    let data = null;
+    try { data = JSON.parse(xhr.responseText); } catch { /* fall through */ }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      lastResult.value = data;
+      status.value = "done";
+    } else {
+      const detail = data?.detail || `HTTP ${xhr.status}`;
+      finishWithError(detail);
     }
-    lastResult.value = data;
-    status.value = "done";
-  } catch (err) {
-    status.value = "error";
-    errorMessage.value = err?.message || String(err);
-  } finally {
-    if (elapsedTimer) {
-      clearInterval(elapsedTimer);
-      elapsedTimer = null;
-    }
-  }
+    cleanupTimers();
+  };
+  xhr.onerror = () => finishWithError("network error");
+  xhr.ontimeout = () => finishWithError("upload timed out");
+
+  xhr.send(fd);
 }
 
-function getAuthHeader() {
-  // Match the same Bearer-token pattern the axios api uses; for fetch() we
-  // attach it manually since we're outside the axios interceptor.
-  const tok = getStoredToken();
-  return tok ? { Authorization: `Bearer ${tok}` } : {};
+function finishWithError(message) {
+  status.value = "error";
+  errorMessage.value = message;
+  cleanupTimers();
+}
+
+function cleanupTimers() {
+  if (elapsedTimer) {
+    clearInterval(elapsedTimer);
+    elapsedTimer = null;
+  }
+  activeXhr = null;
 }
 
 function openMeeting() {
@@ -227,11 +308,20 @@ function dismiss() {
   status.value = "idle";
   lastResult.value = null;
   errorMessage.value = "";
+  uploadPercent.value = null;
+  largeFileTip.value = null;
+  if (largeFileTipTimer) {
+    clearTimeout(largeFileTipTimer);
+    largeFileTipTimer = null;
+  }
 }
 
 function abort() {
-  // Doesn't actually cancel the backend; just hides the indicator.
+  // Doesn't actually cancel the backend pipeline once the upload bytes are
+  // already on the server — just hides the indicator. The meeting note will
+  // still appear when the pipeline completes.
   status.value = "idle";
+  uploadPercent.value = null;
 }
 
 onMounted(() => {
@@ -246,5 +336,6 @@ onUnmounted(() => {
   window.removeEventListener("dragover", onDragOver);
   window.removeEventListener("drop", onDrop);
   if (elapsedTimer) clearInterval(elapsedTimer);
+  if (largeFileTipTimer) clearTimeout(largeFileTipTimer);
 });
 </script>

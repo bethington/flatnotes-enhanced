@@ -40,7 +40,7 @@
       <span class="text-sm flex-1 truncate">
         {{ finalizeMessage || "Finalizing…" }}
       </span>
-      <span class="text-xs opacity-75 shrink-0">phase: {{ finalizePhase || "starting" }}</span>
+      <span class="text-xs opacity-75 shrink-0">{{ finalizePhaseLabel }}</span>
     </div>
   </div>
 
@@ -98,6 +98,21 @@ const formattedElapsed = computed(() => {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+});
+
+// Map backend phase strings (whisper/voiceprints/meetings/import) to
+// user-friendly labels — jargon shouldn't leak into the status bar.
+const PHASE_LABELS = {
+  starting: "starting",
+  whisper: "transcribing",
+  voiceprints: "identifying speakers",
+  meetings: "generating summary",
+  import: "saving",
+  finalize: "finalizing",
+};
+const finalizePhaseLabel = computed(() => {
+  const raw = finalizePhase.value || "starting";
+  return PHASE_LABELS[raw] || raw;
 });
 
 defineExpose({ start, stop, state });

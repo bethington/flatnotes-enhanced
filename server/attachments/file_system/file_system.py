@@ -63,11 +63,15 @@ class FileSystemAttachments(BaseAttachments):
         usage_map: dict[str, list[str]] = {}
         notes_path = self.base_path
         for root, dirs, files in os.walk(notes_path):
-            # Skip system directories and the attachments folder itself
+            # Skip system directories, the attachments folder itself, and
+            # per-note sidecar dirs (`<note>.assets/`) — those hold per-note
+            # AI chat / audio / transcript and shouldn't be scanned for
+            # global attachment references.
             dirs[:] = [
                 d for d in dirs
                 if d not in ("attachments", ".flatnotes", ".metadata",
                              "_trash", "_archive")
+                and not d.endswith(".assets")
             ]
             for fname in files:
                 if not fname.endswith(".md"):

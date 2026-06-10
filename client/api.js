@@ -327,6 +327,45 @@ export async function getFolderNotes(folder) {
   }
 }
 
+// ── Bulk folder/file upload ──────────────────────────────────────────────────
+// `files` and `paths` are parallel arrays: paths[i] is the vault-relative path
+// (structure-preserving) for files[i]. `dest` is the destination folder.
+export async function uploadFolder(files, paths, dest = "", overwrite = false) {
+  try {
+    const formData = new FormData();
+    files.forEach((f) => formData.append("files", f));
+    paths.forEach((p) => formData.append("paths", p));
+    formData.append("dest", dest || "");
+    formData.append("overwrite", overwrite ? "true" : "false");
+    const response = await api.post("api/folders/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+    });
+    return response.data;
+  } catch (response) {
+    return Promise.reject(response);
+  }
+}
+
+// ── Folder zip download ──────────────────────────────────────────────────────
+// Routed through axios (not a plain <a href>) so the Bearer-token interceptor
+// authenticates the request, then a blob URL drives the browser save dialog.
+export async function downloadFolder(path = "") {
+  const response = await api.get("api/folders/download", {
+    params: { path: path || "" },
+    responseType: "blob",
+  });
+  const blob = new Blob([response.data], { type: "application/zip" });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const base = path ? path.split("/").pop() : "vault";
+  a.download = `${base}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
+}
+
 // ── Header colors API ────────────────────────────────────────────────────────
 export async function getHeaderColors() {
   try {
