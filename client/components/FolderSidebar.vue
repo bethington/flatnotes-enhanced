@@ -68,6 +68,55 @@
             <path d="M17.65,6.35C16.2,4.9 14.21,4 12,4A8,8 0 0,0 4,12A8,8 0 0,0 12,20C15.73,20 18.84,17.45 19.73,14H17.65C16.83,16.33 14.61,18 12,18A6,6 0 0,1 6,12A6,6 0 0,1 12,6C13.66,6 15.14,6.69 16.22,7.78L13,11H20V4L17.65,6.35Z"/>
           </svg>
         </button>
+        <!-- New folder (created inside the active folder) -->
+        <div class="relative">
+          <button
+            @click="toggleNewFolderPopover"
+            class="text-theme-text-muted hover:text-theme-text transition-colors p-1 rounded"
+            :class="{ 'text-theme-brand': showNewFolderPopover }"
+            :title="`New folder in ${activeFolder || 'Root'}`"
+          >
+            <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+              <path d="M20,6A2,2 0 0,1 22,8V18A2,2 0 0,1 20,20H4C2.89,20 2,19.1 2,18V6C2,4.89 2.89,4 4,4H10L12,6H20M19,14H17V12H15V14H13V16H15V18H17V16H19V14Z"/>
+            </svg>
+          </button>
+          <!-- Outside-click catcher -->
+          <div v-if="showNewFolderPopover" class="fixed inset-0 z-40" @click="cancelNewTopFolder"></div>
+          <!-- New folder popover -->
+          <div
+            v-if="showNewFolderPopover"
+            class="absolute right-0 mt-1 z-50 w-64 bg-theme-background border border-theme-border rounded-md shadow-lg p-3"
+          >
+            <div class="text-xs text-theme-text-muted mb-1.5 font-medium">
+              New folder in <span class="text-theme-text font-semibold">{{ activeFolder || 'Root' }}</span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <input
+                ref="newTopFolderInputEl"
+                v-model="newTopFolderName"
+                type="text"
+                placeholder="Folder name"
+                class="flex-1 min-w-0 text-sm bg-theme-background border border-theme-border rounded px-2 py-1 outline-none focus:border-theme-brand text-theme-text placeholder-theme-text-very-muted"
+                @keydown.enter.prevent="confirmNewTopFolder"
+                @keydown.escape.prevent="cancelNewTopFolder"
+              />
+              <button
+                @click="confirmNewTopFolder"
+                :disabled="creatingFolder"
+                class="shrink-0 p-1 rounded text-theme-brand hover:bg-theme-brand/10 transition-colors disabled:opacity-40"
+                title="Create folder"
+              >
+                <svg viewBox="0 0 24 24" class="w-4 h-4 fill-current">
+                  <path d="M21,7L9,19L3.5,13.5L4.91,12.09L9,16.17L19.59,5.59L21,7Z"/>
+                </svg>
+              </button>
+            </div>
+            <p v-if="newTopFolderError" class="text-xs text-red-500 mt-1">{{ newTopFolderError }}</p>
+            <p v-else class="text-xs text-theme-text-very-muted mt-1 leading-snug">
+              Use / for nested folders. A starter "Untitled" note is added so the folder shows.
+            </p>
+          </div>
+        </div>
         <!-- Upload files / folder into the active folder -->
         <div class="relative">
           <button
@@ -489,6 +538,63 @@ const newFolderInputEl   = ref(null);
 
 // ── Folder search state ────────────────────────────────────────────────────
 const folderSearchQuery = ref("");
+
+// ── New-folder (header button) state ─────────────────────────────────────────
+// Distinct from the Move-dialog's new-folder state (showNewFolderInput etc.),
+// which creates a folder only as a move/duplicate target.
+const showNewFolderPopover = ref(false);
+const newTopFolderName     = ref("");
+const newTopFolderError    = ref("");
+const newTopFolderInputEl  = ref(null);
+const creatingFolder       = ref(false);
+
+function toggleNewFolderPopover() {
+  showNewFolderPopover.value = !showNewFolderPopover.value;
+  if (showNewFolderPopover.value) {
+    newTopFolderName.value  = "";
+    newTopFolderError.value = "";
+    nextTick(() => newTopFolderInputEl.value?.focus());
+  }
+}
+
+function cancelNewTopFolder() {
+  showNewFolderPopover.value = false;
+  newTopFolderName.value     = "";
+  newTopFolderError.value    = "";
+}
+
+// flatnotes folders are implicit (a folder exists because a note lives in it),
+// so we materialise a new folder by creating a starter "Untitled" note inside
+// it. The folder is created relative to the currently active folder.
+async function confirmNewTopFolder() {
+  const name  = newTopFolderName.value.trim();
+  const error = validateFolderName(name);
+  if (error) {
+    newTopFolderError.value = error;
+    return;
+  }
+  const base       = activeFolder.value || "";
+  const folderPath = base ? `${base}/${name}` : name;
+  const starter    = `${folderPath}/Untitled`;
+
+  creatingFolder.value = true;
+  try {
+    await createNote(starter, "");
+    cancelNewTopFolder();
+    toast.add(getToastOptions(`Created folder "${folderPath}"`, "Folder created", "success"));
+    await loadFolders();
+    navigate(folderPath);
+  } catch (err) {
+    if (err.response?.status === 409) {
+      newTopFolderError.value = "That folder already has an Untitled note.";
+    } else {
+      console.error("Create folder failed:", err);
+      newTopFolderError.value = "Could not create folder. See console.";
+    }
+  } finally {
+    creatingFolder.value = false;
+  }
+}
 
 // ── Upload / download state ──────────────────────────────────────────────────
 const fileInputEl    = ref(null);
