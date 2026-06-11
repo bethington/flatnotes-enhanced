@@ -120,45 +120,66 @@ class ClaudeCLIStrategy:
         is_continuation: bool,
         system_append: str | None = None,
     ) -> str:
-        # First turn → --session-id creates the session
-        # Continuation → --resume picks up where we left off
-        session_flag = ["--resume", session_id] if is_continuation else ["--session-id", session_id]
-        cmd = [
-            CLAUDE_PATH,
-            "-p", message,
-            "--model", self.model,
-            *session_flag,
-            "--mcp-config", str(mcp_config_path),
-            "--strict-mcp-config",
-            "--allowedTools", ",".join(self.allowed_tools),
-        ]
-        # Scope context (per-tab) is appended to the system prompt so the AI
-        # biases its tool calls toward the current scope. AI can still crawl
-        # wider via explicit calls — scope is a prior, not a prison.
-        if system_append:
-            cmd.extend(["--append-system-prompt", system_append])
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=os.environ.copy(),
-        )
-        try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=self.timeout_s
+        # First turn → --session-id creates the session.
+        # Continuation → --resume picks up where we left off.
+        #
+        # The local claude session store can be wiped out from under us — a CLI
+        # upgrade or cache prune leaves the vault chat note pointing at a
+        # session id claude no longer knows, and --resume then exits 1 with
+        # "No conversation found with session ID: <id>". Recover by
+        # re-establishing the same id with --session-id so the chat keeps
+        # working; the vault chat note retains the visible transcript even
+        # though claude-side memory restarts from this turn.
+        def _build_cmd(resume: bool) -> list[str]:
+            session_flag = (["--resume", session_id] if resume
+                            else ["--session-id", session_id])
+            cmd = [
+                CLAUDE_PATH,
+                "-p", message,
+                "--model", self.model,
+                *session_flag,
+                "--mcp-config", str(mcp_config_path),
+                "--strict-mcp-config",
+                "--allowedTools", ",".join(self.allowed_tools),
+            ]
+            # Scope context (per-tab) is appended to the system prompt so the AI
+            # biases its tool calls toward the current scope. AI can still crawl
+            # wider via explicit calls — scope is a prior, not a prison.
+            if system_append:
+                cmd.extend(["--append-system-prompt", system_append])
+            return cmd
+
+        async def _run(cmd: list[str]) -> tuple[int, str, str]:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=os.environ.copy(),
             )
-        except asyncio.TimeoutError:
-            proc.kill()
-            await proc.communicate()
-            raise ClaudeCLIError(
-                exit_code=-1,
-                stderr=f"claude CLI timed out after {self.timeout_s}s",
+            try:
+                out_b, err_b = await asyncio.wait_for(
+                    proc.communicate(), timeout=self.timeout_s
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.communicate()
+                raise ClaudeCLIError(
+                    exit_code=-1,
+                    stderr=f"claude CLI timed out after {self.timeout_s}s",
+                )
+            return (
+                proc.returncode or 0,
+                out_b.decode("utf-8", errors="replace").strip(),
+                err_b.decode("utf-8", errors="replace").strip(),
             )
-        stdout = stdout_b.decode("utf-8", errors="replace").strip()
-        stderr = stderr_b.decode("utf-8", errors="replace").strip()
-        if proc.returncode != 0:
+
+        returncode, stdout, stderr = await _run(_build_cmd(resume=is_continuation))
+        if returncode != 0 and is_continuation and "No conversation found" in stderr:
+            # Stale session — start it fresh under the same id and carry on.
+            returncode, stdout, stderr = await _run(_build_cmd(resume=False))
+        if returncode != 0:
             raise ClaudeCLIError(
-                exit_code=proc.returncode or -1,
+                exit_code=returncode or -1,
                 stderr=stderr,
                 stdout=stdout,
             )
